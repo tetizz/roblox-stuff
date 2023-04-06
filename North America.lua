@@ -1,3 +1,4 @@
+while true do
 wait(1)
 local args = {
     [1] = "Anguilla",
@@ -257,3 +258,4 @@ local args = {
 }
 
 workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+end
