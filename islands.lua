@@ -1,3 +1,4 @@
+while true do
 local args = {
     [1] = "American Samoa",
     [2] = "Conquest"
@@ -165,3 +166,4 @@ local args = {
 }
 
 workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+end
