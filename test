@@ -1,0 +1,1605 @@
+while true do
+local args = {
+    [1] = "Anguilla",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Antigua and Barbuda",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Bahamas",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Barbados",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Belize",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Bermuda",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Bonaire",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Cayman Islands",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "British Virgin Islands",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Canada",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Costa Rica",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Cuba",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Dominica",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Dominican Republic",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "El Salvador",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Greenland",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Grenada",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Guadeloupe",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Guatemala",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Haiti",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Honduras",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Jamaica",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Martinique",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Mexico",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Montserrat",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Nicaragua",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Panama",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Saba",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Saint Barthelemy",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Saint Kitts and Nevis",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Saint Lucia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Saint Pierre and Miquelon",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Saint Vincent and the Grenadines",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Sint Eustatius",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Sint Maarten",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "United States",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "United States Virgin Islands",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+end
+ 
+while true do 
+wait(1)
+local args = {
+    [1] = "Albania",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Andorra",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Armenia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Austria",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Belarus",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Belgium",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+local args = {
+    [1] = "Bosnia and Herzegovina",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Bulgaria",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Czech Republic",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Denmark",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Estonia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Faroe Islands",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+local args = {
+    [1] = "Finland",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "France",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Germany",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Gibraltar",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Greece",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Guernsey",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Hungary",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+wait(1)
+local args = {
+    [1] = "Iceland",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Ireland ",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Isle of Man",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Italy",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Jersey",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Latvia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Liechtenstein",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Lithuania",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Luxembourg",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Macedonia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Malta",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Moldova",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Monaco",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Montenegro",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Netherlands",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Norway",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Portugal",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Romania",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Russia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "San Marino",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Serbia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Slovakia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Slovenia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Spain",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Sweden",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+local args = {
+    [1] = "Switzerland",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Turkey",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Ukraine",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "United Kingdom",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+end
+while true do
+local args = {
+    [1] = "Argentina",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Aruba",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Bolivia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Brazil",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Chile",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Colombia",
+    [2] = "Conquest"
+}
+ 
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Curacao",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Ecuador",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Falkland Islands",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "French Guiana",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Guyana",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Panama",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Paraguay",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Peru",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Suriname",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Trinidad and Tobago",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Uruguay",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Venezuela",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+end
+while true do
+wait(1)
+local args = {
+    [1] = "Afghanistan",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Armenia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+local args = {
+    [1] = "Azerbaijan",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Bahrain",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Bangladesh",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Bhutan",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Brunei",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Burma",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Cambodia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+ 
+wait(1)
+local args = {
+    [1] = "China",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Christmas Island",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Cyprus",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Georgia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Hong Kong",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "India",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Indonesia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Iran",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Iraq",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Israel",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Japan",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Jordan",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Kazakhstan",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Laos",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Lebanon",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Macau",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Malaysia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Maldives",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Mongolia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Nepal",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "North Korea",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Oman",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Pakistan",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Philippines",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Qatar",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Saudi Arabia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Singapore",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "South Korea",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Sri Lanka",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Syria",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Taiwan",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Tajikistan",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Thailand",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Turkey",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Turkmenistan",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "United Arab Emirates",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Uzbekistan",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Vietnam",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Yemen",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+end
+while true do
+wait(1)
+local args = {
+    [1] = "Algeria",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Benin",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Botswana",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Burkina Faso",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Burundi",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Cabo Verde",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Cameroon",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Chad",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Comoros",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Cote d'Ivoire",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Democratic Republic of the Congo",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Djibouti",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Egypt",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Eritrea",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Eswatini",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Ethiopia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Gabon",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Gambia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Ghana",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Guinea",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Guinea-Bissau",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Kenya",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Lesotho",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Liberia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Libya",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Madagascar",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Malawi",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Mali",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Mauritania",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Mauritius",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Mayotte",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Mozambique",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Namibia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Niger",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Nigeria",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Rwanda",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Réunion",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Saint Helena",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Sao Tome and Principe",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Senega",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Seychelles",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Sierra Leone",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Somalia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "South Africa",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "South Sudan",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Sudan",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Tanzania",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Togo",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Tunisia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Uganda",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Western Sahara",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Zambia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Zimbabwe",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+end
+while true do
+local args = {
+    [1] = "American Samoa",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Antarctica",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Australia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Cook Islands",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Fiji",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Guam",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Kiribati",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Micronesia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Nauru",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "New Caledonia",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "New Zealand",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Niue",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Norfolk Island",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Northern Mariana Islands",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Palau",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Papua New Guinea",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Rapa Nui",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Samoa",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Solomon Islands",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Tokelau",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Tonga",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Tuvalu",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Vanuatu",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+wait(1)
+local args = {
+    [1] = "Wallis and Futuna",
+    [2] = "Conquest"
+}
+ 
+workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar"):FireServer(unpack(args))
+end
