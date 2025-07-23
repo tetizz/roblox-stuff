@@ -1,4 +1,4 @@
--- Load Obsidian UI Library
+-- Load Library
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))()
 
 local Window = Library:CreateWindow({
@@ -24,7 +24,7 @@ local policiesFolder = replicatedStorage:FindFirstChild("Assets")
 
 if not (policiesFolder and GameManager and workspaceData) then return end
 
--- Get country by leader
+-- Get country
 local function getCountry()
     for _, country in pairs(workspaceData:GetChildren()) do
         local leader = country:FindFirstChild("Leader")
