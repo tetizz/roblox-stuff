@@ -28,10 +28,15 @@ end
 
 -- Get current country by leader
 local function getCountryByLeader(leaderName)
+    print("Searching for country with leader:", leaderName)
     for _, countryData in pairs(workspaceData:GetChildren()) do
         local leader = countryData:FindFirstChild("Leader")
-        if leader and leader.Value == leaderName then
-            return countryData.Name
+        if leader then
+            print("Found leader in:", countryData.Name, "=", leader.Value)
+            if leader.Value == leaderName then
+                print("Matched leader to country:", countryData.Name)
+                return countryData.Name
+            end
         end
     end
     return nil
@@ -42,21 +47,24 @@ local country = getCountryByLeader(player.Name)
 if not country then
     warn("Could not determine player’s country.")
     return
+else
+    print("Player country determined:", country)
 end
 
 -- Get current political power safely
 local function getPoliticalPower()
     local countryData = workspaceData:FindFirstChild(country)
-    if not countryData then return 0 end
+    if not countryData then print("No country data") return 0 end
 
     local power = countryData:FindFirstChild("Power")
-    if not power then return 0 end
+    if not power then print("No power data") return 0 end
 
     local political = power:FindFirstChild("Political")
-    if not political then return 0 end
+    if not political then print("No political value") return 0 end
 
     local success, value = pcall(function() return political.Value end)
     if success and type(value) == "number" then
+        print("Political power:", value)
         return value
     end
 
@@ -67,24 +75,29 @@ end
 local function getActivePolicies()
     local active = {}
     local countryData = workspaceData:FindFirstChild(country)
-    if not countryData then return active end
+    if not countryData then print("No country data for active policies") return active end
 
     local laws = countryData:FindFirstChild("Laws")
-    if not laws then return active end
+    if not laws then print("No laws data") return active end
 
     local policies = laws:FindFirstChild("Policies")
-    if not policies then return active end
+    if not policies then print("No policies folder") return active end
 
     for _, policy in ipairs(policies:GetChildren()) do
         active[policy.Name] = true
     end
+    print("Active policies:", active)
     return active
 end
 
 -- Enact a policy
 local function enactPolicy(policyName)
+    print("Attempting to enact:", policyName)
     local activePolicies = getActivePolicies()
-    if activePolicies[policyName] then return end -- Prevent firing if already active
+    if activePolicies[policyName] then 
+        print("Policy already active:", policyName)
+        return 
+    end
 
     local args = {
         "Policy",
@@ -92,13 +105,13 @@ local function enactPolicy(policyName)
     }
 
     local success, err = pcall(function()
-        workspace:WaitForChild("GameManager"):WaitForChild("ChangeLaw"):FireServer(unpack(args))
+        GameManager:WaitForChild("ChangeLaw"):FireServer(unpack(args))
     end)
 
     if success then
-        print("Enacted policy:", policyName)
+        print("Successfully enacted:", policyName)
     else
-        warn("Failed to enact policy:", policyName, err)
+        warn("Failed to enact:", policyName, err)
     end
 end
 
@@ -128,7 +141,7 @@ local function checkAndEnactPolicies()
     local activePolicies = getActivePolicies()
     local power = getPoliticalPower()
 
-    if not policiesFolder then return end
+    if not policiesFolder then print("No policies folder") return end
 
     for _, policy in ipairs(policiesFolder:GetChildren()) do
         local policyName = policy.Name
@@ -139,9 +152,14 @@ local function checkAndEnactPolicies()
             return costValue and costValue.Value
         end)
 
+        print("Checking:", policyName, "Toggle:", toggle and toggle.Value, "Cost:", cost)
+
         if costSuccess and toggle and toggle.Value and type(cost) == "number" then
             if not activePolicies[policyName] and power >= cost then
+                print("Conditions met for:", policyName)
                 enactPolicy(policyName)
+            else
+                print("Conditions NOT met for:", policyName, "Active:", activePolicies[policyName], "Power:", power)
             end
         end
     end
