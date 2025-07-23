@@ -1,26 +1,33 @@
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local player = Players.LocalPlayer
-local GameManager = workspace:WaitForChild("GameManager")
-local policiesFolder = ReplicatedStorage.Assets.Laws.Policies
+-- Load Obsidian UI Library
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))()
 
 local Window = Library:CreateWindow({
-    Title = "Auto Policy Enactor",
-    Footer = "v1.0",
-    ToggleKeybind = Enum.KeyCode.RightControl,
+    Title = "Auto Policy Enact",
+    Footer = "v1.0.0",
     Center = true,
-    AutoShow = true
+    AutoShow = true,
+    ToggleKeybind = Enum.KeyCode.RightControl
 })
 
-local Tab = Window:AddTab("Policies", "shield")
-local Group = Tab:AddLeftGroupbox("Auto Policies", "list")
+local MainTab = Window:AddTab("Policies", "sliders")
+local Groupbox = MainTab:AddLeftGroupbox("Toggle Policies")
 
--- Get country name by finding the player as leader
+local player = game.Players.LocalPlayer
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local workspaceData = workspace:FindFirstChild("CountryData")
+local policiesFolder = replicatedStorage:FindFirstChild("Assets") 
+    and replicatedStorage.Assets:FindFirstChild("Laws") 
+    and replicatedStorage.Assets.Laws:FindFirstChild("Policies")
+local GameManager = workspace:FindFirstChild("GameManager")
+local RunService = game:GetService("RunService")
+
+if not policiesFolder or not GameManager or not workspaceData then
+    return
+end
+
+-- Get current country by leader
 local function getCountryByLeader(leaderName)
-    for _, countryData in pairs(workspace.CountryData:GetChildren()) do
+    for _, countryData in pairs(workspaceData:GetChildren()) do
         local leader = countryData:FindFirstChild("Leader")
         if leader and leader.Value == leaderName then
             return countryData.Name
@@ -29,77 +36,119 @@ local function getCountryByLeader(leaderName)
     return nil
 end
 
+-- Get player country
 local country = getCountryByLeader(player.Name)
 if not country then
-    warn("Could not determine player’s country.")
     return
 end
 
--- Stores policy toggles
-local policyToggles = {}
+-- Get current political power safely
+local function getPoliticalPower()
+    local countryData = workspaceData:FindFirstChild(country)
+    if not countryData then return 0 end
+
+    local power = countryData:FindFirstChild("Power")
+    if not power then return 0 end
+
+    local political = power:FindFirstChild("Political")
+    if not political then return 0 end
+
+    local success, value = pcall(function() return political.Value end)
+    if success and type(value) == "number" then
+        return value
+    end
+
+    return 0
+end
 
 -- Get active policies
 local function getActivePolicies()
-    local activeFolder = workspace.CountryData[country].Laws:FindFirstChild("Policies")
     local active = {}
-    if activeFolder then
-        for _, policy in ipairs(activeFolder:GetChildren()) do
-            active[policy.Name] = true
-        end
+    local countryData = workspaceData:FindFirstChild(country)
+    if not countryData then return active end
+
+    local laws = countryData:FindFirstChild("Laws")
+    if not laws then return active end
+
+    local policies = laws:FindFirstChild("Policies")
+    if not policies then return active end
+
+    for _, policy in ipairs(policies:GetChildren()) do
+        active[policy.Name] = true
     end
     return active
 end
 
--- Get political power (make sure it’s a number)
-local function getPoliticalPower()
-    local powerObj = workspace.CountryData[country].Power:FindFirstChild("Political")
-    return powerObj and powerObj.Value or 0
-end
-
 -- Enact a policy
+local recentlyEnacted = {}
 local function enactPolicy(policyName)
+    local activePolicies = getActivePolicies()
+    if activePolicies[policyName] then return end
+    if recentlyEnacted[policyName] then return end
+
     local args = {
         "Policy",
         policyName
     }
-    GameManager:WaitForChild("ChangeLaw"):FireServer(unpack(args))
-    print("✅ Enacted policy:", policyName)
+
+    local success, _ = pcall(function()
+        GameManager:WaitForChild("ChangeLaw"):FireServer(unpack(args))
+    end)
+
+    if success then
+        recentlyEnacted[policyName] = true
+    end
 end
 
--- Go through toggled policies and try to enact
+-- Sanitize toggle key for Obsidian compatibility
+local function sanitizeKey(name)
+    return name:gsub("[^%w]", "_")
+end
+
+-- Create toggle for each policy and store toggle references
+local Toggles = {}
+if policiesFolder then
+    for _, policy in ipairs(policiesFolder:GetChildren()) do
+        local policyName = policy.Name
+        local key = sanitizeKey(policyName)
+        Toggles[key] = Groupbox:AddToggle("Toggle_" .. key, {
+            Text = policyName,
+            Default = false,
+            Callback = function(val)
+            end
+        })
+    end
+end
+
+-- Auto-check policies and enact if affordable and not already active
 local function checkAndEnactPolicies()
     local activePolicies = getActivePolicies()
-    local currentPower = getPoliticalPower()
+    local power = getPoliticalPower()
 
-    for policyName, toggle in pairs(policyToggles) do
-        local isEnabled = toggle:GetState()
-        local policy = policiesFolder:FindFirstChild(policyName)
+    if not policiesFolder then return end
 
-        if isEnabled and not activePolicies[policyName] and policy then
-            local costVal = policy:FindFirstChild("PPCost")
-            if costVal and typeof(costVal.Value) == "number" then
-                local cost = costVal.Value
-                if currentPower >= cost then
-                    enactPolicy(policyName)
-                end
-            end
+    for _, policy in ipairs(policiesFolder:GetChildren()) do
+        local policyName = policy.Name
+        local costValue = policy:FindFirstChild("PPCost")
+        local toggle = Toggles[sanitizeKey(policyName)]
+
+        local cost = 0
+        if costValue and costValue:IsA("Vector3Value") then
+            cost = costValue.Value.X
+        end
+
+        local isActive = activePolicies[policyName] == true
+        local isToggled = toggle and toggle.Value
+
+        if isToggled and not isActive and type(cost) == "number" and power >= cost then
+            enactPolicy(policyName)
+        elseif not isActive then
+            recentlyEnacted[policyName] = nil
         end
     end
 end
 
--- UI: Add toggle for every policy
-for _, policy in ipairs(policiesFolder:GetChildren()) do
-    local policyName = policy.Name
-    policyToggles[policyName] = Group:AddToggle(policyName, {
-        Text = policyName,
-        Default = false,
-        Callback = function(val)
-            print(policyName, "toggle set to", val)
-        end
-    })
-end
-
--- Use Heartbeat instead of while true
+-- Use Heartbeat instead of while true loop
 RunService.Heartbeat:Connect(function()
-    checkAndEnactPolicies()
+    pcall(checkAndEnactPolicies)
 end)
