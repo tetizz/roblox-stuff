@@ -21,9 +21,7 @@ local policiesFolder = replicatedStorage:FindFirstChild("Assets")
 local GameManager = workspace:FindFirstChild("GameManager")
 local RunService = game:GetService("RunService")
 
-if not policiesFolder or not GameManager or not workspaceData then
-    return
-end
+if not policiesFolder or not GameManager or not workspaceData then return end
 
 -- Get current country by leader
 local function getCountryByLeader(leaderName)
@@ -38,9 +36,7 @@ end
 
 -- Get player country
 local country = getCountryByLeader(player.Name)
-if not country then
-    return
-end
+if not country then return end
 
 -- Get current political power safely
 local function getPoliticalPower()
@@ -79,8 +75,22 @@ local function getActivePolicies()
     return active
 end
 
--- Enact a policy
+-- Store instance references to detect if removed later
 local recentlyEnacted = {}
+
+-- Periodic cleanup for removed policy instances
+task.spawn(function()
+    while true do
+        for policyName, instance in pairs(recentlyEnacted) do
+            if not instance or not instance.Parent then
+                recentlyEnacted[policyName] = nil
+            end
+        end
+        task.wait(5)
+    end
+end)
+
+-- Enact a policy
 local function enactPolicy(policyName)
     local activePolicies = getActivePolicies()
     if activePolicies[policyName] then return end
@@ -96,7 +106,13 @@ local function enactPolicy(policyName)
     end)
 
     if success then
-        recentlyEnacted[policyName] = true
+        -- Track the instance in Laws.Policies to detect later removal
+        local countryData = workspaceData:FindFirstChild(country)
+        local laws = countryData and countryData:FindFirstChild("Laws")
+        local policies = laws and laws:FindFirstChild("Policies")
+        local policyInstance = policies and policies:FindFirstChild(policyName)
+
+        recentlyEnacted[policyName] = policyInstance or true
     end
 end
 
@@ -114,12 +130,12 @@ if policiesFolder then
         Toggles[key] = Groupbox:AddToggle("Toggle_" .. key, {
             Text = policyName,
             Default = false,
-            Callback = function(val)
-            end
+            Callback = function(val) end
         })
     end
 end
 
+-- Auto-check policies and enact if affordable and not already active
 local function checkAndEnactPolicies()
     local activePolicies = getActivePolicies()
     local power = getPoliticalPower()
@@ -139,17 +155,12 @@ local function checkAndEnactPolicies()
         local isActive = activePolicies[policyName] == true
         local isToggled = toggle and toggle.Value
 
-        -- Ensure reenactment if previously enacted but no longer active
-        if not isActive then
-            recentlyEnacted[policyName] = nil
-        end
-
-        -- Enact if toggled and valid
         if isToggled and not isActive and type(cost) == "number" and power >= cost then
             enactPolicy(policyName)
         end
     end
 end
+
 -- Use Heartbeat instead of while true loop
 RunService.Heartbeat:Connect(function()
     pcall(checkAndEnactPolicies)
