@@ -120,7 +120,6 @@ if policiesFolder then
     end
 end
 
--- Auto-check policies and enact if affordable and not already active
 local function checkAndEnactPolicies()
     local activePolicies = getActivePolicies()
     local power = getPoliticalPower()
@@ -140,14 +139,17 @@ local function checkAndEnactPolicies()
         local isActive = activePolicies[policyName] == true
         local isToggled = toggle and toggle.Value
 
+        -- Ensure reenactment if previously enacted but no longer active
+        if not isActive then
+            recentlyEnacted[policyName] = nil
+        end
+
+        -- Enact if toggled and valid
         if isToggled and not isActive and type(cost) == "number" and power >= cost then
             enactPolicy(policyName)
-        elseif not isActive then
-            recentlyEnacted[policyName] = nil
         end
     end
 end
-
 -- Use Heartbeat instead of while true loop
 RunService.Heartbeat:Connect(function()
     pcall(checkAndEnactPolicies)
