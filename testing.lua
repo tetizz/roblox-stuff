@@ -15,81 +15,169 @@ local Groupbox = MainTab:AddLeftGroupbox("Toggle Policies")
 local player = game.Players.LocalPlayer
 local replicatedStorage = game:GetService("ReplicatedStorage")
 local workspaceData = workspace:FindFirstChild("CountryData")
-local policiesFolder = replicatedStorage.Assets.Laws.Policies
-local GameManager = workspace.GameManager
+local policiesFolder = replicatedStorage:FindFirstChild("Assets") 
+    and replicatedStorage.Assets:FindFirstChild("Laws") 
+    and replicatedStorage.Assets.Laws:FindFirstChild("Policies")
+local GameManager = workspace:FindFirstChild("GameManager")
 local RunService = game:GetService("RunService")
 
+if not policiesFolder or not GameManager or not workspaceData then
+    warn("Essential game elements missing (Policies, GameManager, or CountryData).")
+    return
+end
+
+-- Get current country by leader
 local function getCountryByLeader(leaderName)
+    print("Searching for country with leader:", leaderName)
     for _, countryData in pairs(workspaceData:GetChildren()) do
         local leader = countryData:FindFirstChild("Leader")
-        if leader and leader.Value == leaderName then
-            return countryData.Name
+        if leader then
+            print("Found leader in:", countryData.Name, "=", leader.Value)
+            if leader.Value == leaderName then
+                print("Matched leader to country:", countryData.Name)
+                return countryData.Name
+            end
         end
     end
     return nil
 end
 
+-- Get player country
 local country = getCountryByLeader(player.Name)
-
-local function getPoliticalPower()
-    return workspaceData[country].Power.Political.Value
+if not country then
+    warn("Could not determine player’s country.")
+    return
+else
+    print("Player country determined:", country)
 end
 
+-- Get current political power safely
+local function getPoliticalPower()
+    local countryData = workspaceData:FindFirstChild(country)
+    if not countryData then print("No country data") return 0 end
+
+    local power = countryData:FindFirstChild("Power")
+    if not power then print("No power data") return 0 end
+
+    local political = power:FindFirstChild("Political")
+    if not political then print("No political value") return 0 end
+
+    local success, value = pcall(function() return political.Value end)
+    if success and type(value) == "number" then
+        print("Political power:", value)
+        return value
+    end
+
+    return 0
+end
+
+-- Get active policies
 local function getActivePolicies()
     local active = {}
-    for _, policy in ipairs(workspaceData[country].Laws.Policies:GetChildren()) do
+    local countryData = workspaceData:FindFirstChild(country)
+    if not countryData then print("No country data for active policies") return active end
+
+    local laws = countryData:FindFirstChild("Laws")
+    if not laws then print("No laws data") return active end
+
+    local policies = laws:FindFirstChild("Policies")
+    if not policies then print("No policies folder") return active end
+
+    for _, policy in ipairs(policies:GetChildren()) do
         active[policy.Name] = true
     end
+    print("Active policies:", active)
     return active
 end
 
+-- Enact a policy
+local recentlyEnacted = {}
 local function enactPolicy(policyName)
+    print("Attempting to enact:", policyName)
+    local activePolicies = getActivePolicies()
+    if activePolicies[policyName] then
+        print("Policy is already active, not enacting again:", policyName)
+        return
+    end
+    if recentlyEnacted[policyName] then
+        print("Already enacted recently:", policyName)
+        return
+    end
+
     local args = {
         "Policy",
         policyName
     }
-    GameManager:WaitForChild("ChangeLaw"):FireServer(unpack(args))
+
+    local success, err = pcall(function()
+        GameManager:WaitForChild("ChangeLaw"):FireServer(unpack(args))
+    end)
+
+    if success then
+        print("Successfully enacted:", policyName)
+        recentlyEnacted[policyName] = true
+    else
+        warn("Failed to enact:", policyName, err)
+    end
 end
 
+-- Sanitize toggle key for Obsidian compatibility
 local function sanitizeKey(name)
     return name:gsub("[^%w]", "_")
 end
 
+-- Create toggle for each policy and store toggle references
 local Toggles = {}
-for _, policy in ipairs(policiesFolder:GetChildren()) do
-    local policyName = policy.Name
-    local key = sanitizeKey(policyName)
-    Toggles[key] = Groupbox:AddToggle("Toggle_" .. key, {
-        Text = policyName,
-        Default = false,
-        Callback = function() end
-    })
+if policiesFolder then
+    for _, policy in ipairs(policiesFolder:GetChildren()) do
+        local policyName = policy.Name
+        local key = sanitizeKey(policyName)
+        Toggles[key] = Groupbox:AddToggle("Toggle_" .. key, {
+            Text = policyName,
+            Default = false,
+            Callback = function(val)
+                print(policyName .. " toggled to " .. tostring(val))
+            end
+        })
+    end
 end
 
-local recentlyEnacted = {}
-
+-- Auto-check policies and enact if affordable and not already active
 local function checkAndEnactPolicies()
     local activePolicies = getActivePolicies()
     local power = getPoliticalPower()
 
+    if not policiesFolder then print("No policies folder") return end
+
     for _, policy in ipairs(policiesFolder:GetChildren()) do
         local policyName = policy.Name
         local costValue = policy:FindFirstChild("PPCost")
-        local cost = costValue and costValue.Value or 0
         local toggle = Toggles[sanitizeKey(policyName)]
 
-        if toggle and toggle.Value and power >= cost then
-            if not activePolicies[policyName] and not recentlyEnacted[policyName] then
-                enactPolicy(policyName)
-                recentlyEnacted[policyName] = true
-            elseif activePolicies[policyName] then
-                recentlyEnacted[policyName] = nil
-            end
+        local cost = 0
+        if costValue and costValue:IsA("Vector3Value") then
+            cost = costValue.Value.X -- use only the X component
+        else
+            print("PPCost missing or invalid for:", policyName)
+        end
+
+        local isActive = activePolicies[policyName] == true
+        local isToggled = toggle and toggle.Value
+
+        print("Checking:", policyName, "Toggle:", isToggled, "Active:", isActive, "Cost:", cost, "Power:", power)
+
+        if isToggled and not isActive and type(cost) == "number" and power >= cost then
+            print("Conditions met for:", policyName)
+            enactPolicy(policyName)
+        elseif isToggled and isActive then
+            recentlyEnacted[policyName] = true -- still active, maintain in recentlyEnacted
+        elseif not isActive then
+            recentlyEnacted[policyName] = nil -- policy no longer active, allow reenactment
         end
     end
 end
 
+-- Use Heartbeat instead of while true loop
 RunService.Heartbeat:Connect(function()
-    checkAndEnactPolicies()
+    pcall(checkAndEnactPolicies)
 end)
-
