@@ -1,4 +1,4 @@
--- Load Library
+-- Load Obsidian UI Library
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))()
 
 local Window = Library:CreateWindow({
@@ -15,147 +15,95 @@ local Groupbox = MainTab:AddLeftGroupbox("Toggle Policies")
 local player = game.Players.LocalPlayer
 local replicatedStorage = game:GetService("ReplicatedStorage")
 local workspaceData = workspace:FindFirstChild("CountryData")
-local policiesFolder = replicatedStorage:FindFirstChild("Assets") 
-    and replicatedStorage.Assets:FindFirstChild("Laws") 
-    and replicatedStorage.Assets.Laws:FindFirstChild("Policies")
 local GameManager = workspace:FindFirstChild("GameManager")
 local RunService = game:GetService("RunService")
 
-if not policiesFolder or not GameManager or not workspaceData then return end
+local policiesFolder = replicatedStorage:FindFirstChild("Assets") 
+    and replicatedStorage.Assets:FindFirstChild("Laws")
+    and replicatedStorage.Assets.Laws:FindFirstChild("Policies")
 
--- Get current country 
-local function getCountryByLeader(leaderName)
-    for _, countryData in pairs(workspaceData:GetChildren()) do
-        local leader = countryData:FindFirstChild("Leader")
-        if leader and leader.Value == leaderName then
-            return countryData.Name
+if not (policiesFolder and GameManager and workspaceData) then return end
+
+-- Get country by leader
+local function getCountry()
+    for _, country in pairs(workspaceData:GetChildren()) do
+        local leader = country:FindFirstChild("Leader")
+        if leader and leader.Value == player.Name then
+            return country.Name
         end
     end
-    return nil
 end
 
--- Get player country
-local country = getCountryByLeader(player.Name)
+local country = getCountry()
 if not country then return end
 
--- Get current political power
-local function getPoliticalPower()
-    local countryData = workspaceData:FindFirstChild(country)
-    if not countryData then return 0 end
-
-    local power = countryData:FindFirstChild("Power")
-    if not power then return 0 end
-
-    local political = power:FindFirstChild("Political")
-    if not political then return 0 end
-
-    local success, value = pcall(function() return political.Value end)
-    if success and type(value) == "number" then
-        return value
-    end
-
-    return 0
+local function getPower()
+    local political = workspaceData[country]:FindFirstChild("Power") and workspaceData[country].Power:FindFirstChild("Political")
+    return (political and typeof(political.Value) == "number") and political.Value or 0
 end
 
--- Get active policies
 local function getActivePolicies()
     local active = {}
-    local countryData = workspaceData:FindFirstChild(country)
-    if not countryData then return active end
-
-    local laws = countryData:FindFirstChild("Laws")
-    if not laws then return active end
-
-    local policies = laws:FindFirstChild("Policies")
-    if not policies then return active end
-
-    for _, policy in ipairs(policies:GetChildren()) do
-        active[policy.Name] = true
+    local policyFolder = workspaceData[country]:FindFirstChild("Laws") and workspaceData[country].Laws:FindFirstChild("Policies")
+    if policyFolder then
+        for _, p in ipairs(policyFolder:GetChildren()) do
+            active[p.Name] = true
+        end
     end
     return active
 end
 
--- Enact a policy
 local recentlyEnacted = {}
-local function enactPolicy(policyName)
-    local args = {
-        "Policy",
-        policyName
-    }
-
-    local success, _ = pcall(function()
-        GameManager:WaitForChild("ChangeLaw"):FireServer(unpack(args))
-    end)
-
-    if success then
-        recentlyEnacted[policyName] = true
-    end
+local function enactPolicy(name)
+    GameManager:WaitForChild("ChangeLaw"):FireServer("Policy", name)
+    recentlyEnacted[name] = true
 end
 
-local function sanitizeKey(name)
+local function sanitize(name)
     return name:gsub("[^%w]", "_")
 end
 
--- Create toggle for each policy and store toggle references (sorted alphabetically)
 local Toggles = {}
-if policiesFolder then
-    local policies = policiesFolder:GetChildren()
-    table.sort(policies, function(a, b)
-        return a.Name:lower() < b.Name:lower()
-    end)
+local sortedPolicies = policiesFolder:GetChildren()
+table.sort(sortedPolicies, function(a, b) return a.Name < b.Name end)
 
-    for _, policy in ipairs(policies) do
-        local policyName = policy.Name
-        local key = sanitizeKey(policyName)
-        Toggles[key] = Groupbox:AddToggle("Toggle_" .. key, {
-            Text = policyName,
-            Default = false,
-            Callback = function(val) end
-        })
-    end
+for _, policy in ipairs(sortedPolicies) do
+    local key = sanitize(policy.Name)
+    Toggles[key] = Groupbox:AddToggle("Toggle_" .. key, {
+        Text = policy.Name,
+        Default = false,
+        Callback = function() end
+    })
 end
 
--- Cleanup function to remove policies from recentlyEnacted if they are no longer active
 task.spawn(function()
     while true do
-        local activePolicies = getActivePolicies()
-        for policyName, _ in pairs(recentlyEnacted) do
-            if not activePolicies[policyName] then
-                recentlyEnacted[policyName] = nil
+        local active = getActivePolicies()
+        for name in pairs(recentlyEnacted) do
+            if not active[name] then
+                recentlyEnacted[name] = nil
             end
         end
         task.wait(5)
     end
 end)
 
--- Auto-check and enact if affordable and not already active
-local function checkAndEnactPolicies()
-    local activePolicies = getActivePolicies()
-    local power = getPoliticalPower()
-
-    if not policiesFolder then return end
+local function processPolicies()
+    local active = getActivePolicies()
+    local power = getPower()
 
     for _, policy in ipairs(policiesFolder:GetChildren()) do
-        local policyName = policy.Name
-        local costValue = policy:FindFirstChild("PPCost")
-        local toggle = Toggles[sanitizeKey(policyName)]
+        local name = policy.Name
+        local toggle = Toggles[sanitize(name)]
+        local costObj = policy:FindFirstChild("PPCost")
+        local cost = (costObj and costObj:IsA("Vector3Value")) and costObj.Value.X or 0
 
-        local cost = 0
-        if costValue and costValue:IsA("Vector3Value") then
-            cost = costValue.Value.X
-        end
-
-        local isActive = activePolicies[policyName] == true
-        local isToggled = toggle and toggle.Value
-        local isRecently = recentlyEnacted[policyName]
-
-        if isToggled and not isActive and not isRecently and power >= cost then
-            enactPolicy(policyName)
+        if toggle and toggle.Value and not active[name] and not recentlyEnacted[name] and power >= cost then
+            enactPolicy(name)
         end
     end
 end
 
--- Heartbeat function
 RunService.Heartbeat:Connect(function()
-    pcall(checkAndEnactPolicies)
+    pcall(processPolicies)
 end)
