@@ -1,8 +1,8 @@
--- Load Obsidian UI Library
+-- Load Library
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))()
 
 local Window = Library:CreateWindow({
-    Title = "Auto Policy Enact",
+    Title = "Auto Policy",
     Footer = "v1.0.0",
     Center = true,
     AutoShow = true,
@@ -23,7 +23,7 @@ local RunService = game:GetService("RunService")
 
 if not policiesFolder or not GameManager or not workspaceData then return end
 
--- Get current country by leader
+-- Get current country 
 local function getCountryByLeader(leaderName)
     for _, countryData in pairs(workspaceData:GetChildren()) do
         local leader = countryData:FindFirstChild("Leader")
@@ -38,7 +38,7 @@ end
 local country = getCountryByLeader(player.Name)
 if not country then return end
 
--- Get current political power safely
+-- Get current political power
 local function getPoliticalPower()
     local countryData = workspaceData:FindFirstChild(country)
     if not countryData then return 0 end
@@ -92,15 +92,19 @@ local function enactPolicy(policyName)
     end
 end
 
--- Sanitize toggle key for Obsidian compatibility
 local function sanitizeKey(name)
     return name:gsub("[^%w]", "_")
 end
 
--- Create toggle for each policy and store toggle references
+-- Create toggle for each policy and store toggle references (sorted alphabetically)
 local Toggles = {}
 if policiesFolder then
-    for _, policy in ipairs(policiesFolder:GetChildren()) do
+    local policies = policiesFolder:GetChildren()
+    table.sort(policies, function(a, b)
+        return a.Name:lower() < b.Name:lower()
+    end)
+
+    for _, policy in ipairs(policies) do
         local policyName = policy.Name
         local key = sanitizeKey(policyName)
         Toggles[key] = Groupbox:AddToggle("Toggle_" .. key, {
@@ -111,7 +115,7 @@ if policiesFolder then
     end
 end
 
--- Cleanup function: remove policies from recentlyEnacted if not active anymore
+-- Cleanup function to remove policies from recentlyEnacted if they are no longer active
 task.spawn(function()
     while true do
         local activePolicies = getActivePolicies()
@@ -124,7 +128,7 @@ task.spawn(function()
     end
 end)
 
--- Auto-check policies and enact if affordable and not already active
+-- Auto-check and enact if affordable and not already active
 local function checkAndEnactPolicies()
     local activePolicies = getActivePolicies()
     local power = getPoliticalPower()
@@ -151,7 +155,7 @@ local function checkAndEnactPolicies()
     end
 end
 
--- Use Heartbeat instead of while true loop
+-- Heartbeat function
 RunService.Heartbeat:Connect(function()
     pcall(checkAndEnactPolicies)
 end)
