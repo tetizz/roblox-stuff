@@ -75,27 +75,9 @@ local function getActivePolicies()
     return active
 end
 
--- Store instance references to detect if removed later
-local recentlyEnacted = {}
-
--- Periodic cleanup for removed policy instances
-task.spawn(function()
-    while true do
-        for policyName, instance in pairs(recentlyEnacted) do
-            if not instance or not instance.Parent then
-                recentlyEnacted[policyName] = nil
-            end
-        end
-        task.wait(5)
-    end
-end)
-
 -- Enact a policy
+local recentlyEnacted = {}
 local function enactPolicy(policyName)
-    local activePolicies = getActivePolicies()
-    if activePolicies[policyName] then return end
-    if recentlyEnacted[policyName] then return end
-
     local args = {
         "Policy",
         policyName
@@ -106,13 +88,7 @@ local function enactPolicy(policyName)
     end)
 
     if success then
-        -- Track the instance in Laws.Policies to detect later removal
-        local countryData = workspaceData:FindFirstChild(country)
-        local laws = countryData and countryData:FindFirstChild("Laws")
-        local policies = laws and laws:FindFirstChild("Policies")
-        local policyInstance = policies and policies:FindFirstChild(policyName)
-
-        recentlyEnacted[policyName] = policyInstance or true
+        recentlyEnacted[policyName] = true
     end
 end
 
@@ -135,6 +111,19 @@ if policiesFolder then
     end
 end
 
+-- Cleanup function: remove policies from recentlyEnacted if not active anymore
+task.spawn(function()
+    while true do
+        local activePolicies = getActivePolicies()
+        for policyName, _ in pairs(recentlyEnacted) do
+            if not activePolicies[policyName] then
+                recentlyEnacted[policyName] = nil
+            end
+        end
+        task.wait(5)
+    end
+end)
+
 -- Auto-check policies and enact if affordable and not already active
 local function checkAndEnactPolicies()
     local activePolicies = getActivePolicies()
@@ -154,8 +143,9 @@ local function checkAndEnactPolicies()
 
         local isActive = activePolicies[policyName] == true
         local isToggled = toggle and toggle.Value
+        local isRecently = recentlyEnacted[policyName]
 
-        if isToggled and not isActive and type(cost) == "number" and power >= cost then
+        if isToggled and not isActive and not isRecently and power >= cost then
             enactPolicy(policyName)
         end
     end
