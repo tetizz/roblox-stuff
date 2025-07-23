@@ -36,12 +36,12 @@ end
 
 local country = getCountry()
 if not country then return end
-
+-- Get political power value
 local function getPower()
     local political = workspaceData[country]:FindFirstChild("Power") and workspaceData[country].Power:FindFirstChild("Political")
     return (political and typeof(political.Value) == "number") and political.Value or 0
 end
-
+-- get current policies
 local function getActivePolicies()
     local active = {}
     local policyFolder = workspaceData[country]:FindFirstChild("Laws") and workspaceData[country].Laws:FindFirstChild("Policies")
@@ -52,7 +52,7 @@ local function getActivePolicies()
     end
     return active
 end
-
+-- Store the policies
 local recentlyEnacted = {}
 local function enactPolicy(name)
     GameManager:WaitForChild("ChangeLaw"):FireServer("Policy", name)
