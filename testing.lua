@@ -91,12 +91,12 @@ local function getActivePolicies()
 end
 
 -- Enact a policy
+local recentlyEnacted = {}
 local function enactPolicy(policyName)
     print("Attempting to enact:", policyName)
-    local activePolicies = getActivePolicies()
-    if activePolicies[policyName] then 
-        print("Policy already active:", policyName)
-        return 
+    if recentlyEnacted[policyName] then
+        print("Already enacted recently:", policyName)
+        return
     end
 
     local args = {
@@ -110,6 +110,7 @@ local function enactPolicy(policyName)
 
     if success then
         print("Successfully enacted:", policyName)
+        recentlyEnacted[policyName] = true
     else
         warn("Failed to enact:", policyName, err)
     end
