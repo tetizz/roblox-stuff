@@ -148,13 +148,16 @@ local function checkAndEnactPolicies()
         local costValue = policy:FindFirstChild("PPCost")
         local toggle = Toggles[sanitizeKey(policyName)]
 
-        local costSuccess, cost = pcall(function()
-            return costValue and costValue.Value
-        end)
+        local cost = 0
+        if costValue and costValue:IsA("Vector3Value") then
+            cost = costValue.Value.X -- use only the X component
+        else
+            print("PPCost missing or invalid for:", policyName)
+        end
 
-        print("Checking:", policyName, "Toggle:", toggle and toggle.Value, "Cost:", cost)
+        print("Checking:", policyName, "Toggle:", toggle and toggle.Value, "Cost:", cost, "Power:", power)
 
-        if costSuccess and toggle and toggle.Value and type(cost) == "number" then
+        if toggle and toggle.Value and type(cost) == "number" then
             if not activePolicies[policyName] and power >= cost then
                 print("Conditions met for:", policyName)
                 enactPolicy(policyName)
