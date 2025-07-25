@@ -2,63 +2,61 @@
 -- Only net-income based sales, 2s between trades, 5-unit cap if AI flow=0 except Consumer Goods
 
 -- 1) Load Obsidian UI
-local Library = loadstring(game:HttpGet(
-    "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"
-))()
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local Window = Library:CreateWindow({
-    Title         = "Advanced Trading",
-    Footer        = "v1.0.0",
+    Title = "Advanced Trading",
+    Footer = "v1.0.0",
     ToggleKeybind = Enum.KeyCode.RightControl,
-    Center        = true,
-    AutoShow      = true,
+    Center = true,
+    AutoShow = true,
 })
 
 -- 2) Services & Player
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService        = game:GetService("RunService")
-local StarterGui        = game:GetService("StarterGui")
-local Players           = game:GetService("Players")
-local player            = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
 
-local GameManager       = workspace:WaitForChild("GameManager")
-local ManageAlliance    = GameManager:WaitForChild("ManageAlliance")
+local GameManager = workspace:WaitForChild("GameManager")
+local ManageAlliance = GameManager:WaitForChild("ManageAlliance")
 
 -- 3) Price Table (sell only)
 local Prices = {
-    Iron                = 30400,
-    Aluminum            = 30400,
-    Oil                 = 32000,
-    Phosphate           = 33200,
-    Copper              = 33600,
-    Chromium            = 38000,
-    Gold                = 43200,
-    Diamond             = 69600,
-    Tungsten            = 76800,
-    Titanium            = 81600,
-    Uranium             = 420000,
-    Steel               = 60000,
-    ["Consumer Goods"]  = 65920,
-    Fertilizer          = 67200,
-    ["Motor Parts"]     = 73600,
-    Electronics         = 81600,
-    ["Aircraft Parts"]  = 83200,
-    ["Enriched Uranium"]= 96000000,
+    Iron = 30400,
+    Aluminum = 30400,
+    Oil = 32000,
+    Phosphate = 33200,
+    Copper = 33600,
+    Chromium = 38000,
+    Gold = 43200,
+    Diamond = 69600,
+    Tungsten = 76800,
+    Titanium = 81600,
+    Uranium = 420000,
+    Steel = 60000,
+    ["Consumer Goods"] = 65920,
+    Fertilizer = 67200,
+    ["Motor Parts"] = 73600,
+    Electronics = 81600,
+    ["Aircraft Parts"] = 83200,
+    ["Enriched Uranium"] = 96000000,
 }
 
 -- 4) Configurable constants
-local MIN_POST_NET  = 1000  -- AI retains ≥ this net income after trade
-local TRADE_DELAY   = 2     -- seconds between each individual trade
+local MIN_POST_NET = 1000  -- AI retains ≥ this net income after trade
+local TRADE_DELAY = 2      -- seconds between each individual trade
 
 -- 5) State
 local selectedResources = {}
-local tradingEnabled    = false
+local tradingEnabled = false
 local aiList, aiIndex, connection
 
 -- 6) Helpers
 local function sumFolder(folder)
     local total = 0
     for _, v in ipairs(folder:GetChildren()) do
-        if v:IsA("NumberValue") then total += v.Value end
+        if v:IsA("NumberValue") then total = total + v.Value end
     end
     return total
 end
@@ -82,7 +80,7 @@ local function sellToAI(myCountry, resName, aiName)
     if not price then return end
 
     local econ = workspace.CountryData:FindFirstChild(aiName)
-                    and workspace.CountryData[aiName]:FindFirstChild("Economy")
+                and workspace.CountryData[aiName]:FindFirstChild("Economy")
     if not econ then return end
 
     -- Debt check
@@ -91,8 +89,8 @@ local function sellToAI(myCountry, resName, aiName)
 
     -- Net income = sum(Revenue) - sum(Expenses)
     local net = 0
-    if econ:FindFirstChild("Revenue")  then net  = sumFolder(econ.Revenue)  end
-    if econ:FindFirstChild("Expenses") then net -= sumFolder(econ.Expenses) end
+    if econ:FindFirstChild("Revenue") then net = sumFolder(econ.Revenue) end
+    if econ:FindFirstChild("Expenses") then net = net - sumFolder(econ.Expenses) end
     if net <= MIN_POST_NET then return end
 
     -- Calculate max by net
@@ -133,7 +131,7 @@ local function heartbeat()
     -- Identify your country
     local myCountry
     for _, c in ipairs(workspace.CountryData:GetChildren()) do
-        if (c.Leader and c.Leader.Value == player.Name) then
+        if c.Leader and c.Leader.Value == player.Name then
             myCountry = c
             break
         end
@@ -145,8 +143,8 @@ local function heartbeat()
         tradingEnabled = false
         connection:Disconnect()
         StarterGui:SetCore("SendNotification", {
-            Title    = "Trade Complete",
-            Text     = "All AI processed.",
+            Title = "Trade Complete",
+            Text = "All AI processed.",
             Duration = 5,
         })
         return
@@ -156,8 +154,7 @@ local function heartbeat()
     local aiName = aiList[aiIndex]
     print("► Processing AI:", aiName)
     sellAllToAI(myCountry, aiName)
-
-    aiIndex += 1
+    aiIndex = aiIndex + 1
     task.wait(TRADE_DELAY)
 end
 
@@ -174,37 +171,47 @@ local function stopTrading()
 end
 
 -- 11) UI Setup
-local TradingTab    = Window:AddTab("Trading", "shopping-cart", "Automated resource trading")
+local TradingTab = Window:AddTab("Trading", "shopping-cart", "Automated resource trading")
 local SettingsGroup = TradingTab:AddLeftGroupbox("Auto-Trade Settings", "settings")
 
 -- Resources dropdown
 local resourcesFolder = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Resources")
 local listNames = {}
-for _, r in ipairs(resourcesFolder:GetChildren()) do table.insert(listNames, r.Name) end
+for _, r in ipairs(resourcesFolder:GetChildren()) do
+    table.insert(listNames, r.Name)
+end
 table.sort(listNames)
 
 SettingsGroup:AddDropdown("TradeResources", {
-    Text    = "Select Resources",
-    Values  = listNames,
+    Text = "Select Resources",
+    Values = listNames,
     Default = {},
-    Multi   = true,
+    Multi = true,
     Tooltip = "Which resources to trade",
     Callback = function(map)
         selectedResources = {}
-        for n, on in pairs(map) do if on then selectedResources[n]=true end end
+        for n, on in pairs(map) do
+            if on then selectedResources[n] = true end
+        end
         local t = {}
-        for n in pairs(selectedResources) do table.insert(t,n) end
-        print("Selected:", #t>0 and table.concat(t,", ") or "none")
+        for n in pairs(selectedResources) do
+            table.insert(t, n)
+        end
+        print("Selected:", #t > 0 and table.concat(t, ", ") or "none")
     end,
 })
 
 -- Enable toggle
 SettingsGroup:AddToggle("EnableAutoTrade", {
-    Text    = "Enable Auto-Trade",
+    Text = "Enable Auto-Trade",
     Default = false,
     Callback = function(v)
         tradingEnabled = v
-        if v then startTrading() else stopTrading() end
+        if v then
+            startTrading()
+        else
+            stopTrading()
+        end
     end,
 })
 
