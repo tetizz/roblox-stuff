@@ -1,4 +1,4 @@
--- Advanced Trading (net‐income only, 2s delay per trade)
+-- Advanced Trading (net-income only, 2s delay, 5-unit cap if AI not producing, special Consumer Goods rule)
 
 print("=== Advanced Trading script loaded ===")
 
@@ -34,16 +34,16 @@ SettingsGroup:AddDropdown("TradeResources", {
     Multi    = true,
     Text     = "Select Resources",
     Tooltip  = "Which resources to trade",
-    Callback = function(selection)
+    Callback = function(map)
         selectedResources = {}
-        for name, on in pairs(selection) do
+        for name,on in pairs(map) do
             if on then selectedResources[name] = true end
         end
         local list = {}
         for name in pairs(selectedResources) do
             table.insert(list, name)
         end
-        print("Resources selected:", #list>0 and table.concat(list, ", ") or "none")
+        print("Resources selected:", #list > 0 and table.concat(list, ", ") or "none")
     end,
 })
 
@@ -58,7 +58,7 @@ SettingsGroup:AddToggle("EnableAutoTrade", {
     end,
 })
 
--- Core services & player
+-- Services & state
 local RunService  = game:GetService("RunService")
 local StarterGui  = game:GetService("StarterGui")
 local Players     = game:GetService("Players")
@@ -87,24 +87,25 @@ local ResourcePrices = {
     ["Enriched Uranium"]= 96000000,
 }
 
--- Minimum net‐income AI must retain after each trade
-local MIN_POST_NET = 1000
+-- Constants
+local MIN_POST_NET = 1000    -- AI must retain ≥ this net income
+local TRADE_DELAY  = 2       -- seconds between each individual trade
 
--- List of AI countries + iterator
+-- AI list & heartbeat connection
 local aiList, aiIndex, connection
 
--- Helper: sum all direct NumberValue children of a folder
+-- Helper: sum direct NumberValue children of a folder
 local function sumFolder(folder)
     local total = 0
     for _, v in ipairs(folder:GetChildren()) do
-        if v:IsA("NumberValue") or v:IsA("IntValue") then
+        if v:IsA("NumberValue") then
             total += v.Value
         end
     end
     return total
 end
 
--- Detect AI nations by Leader.Value == name.."AI"
+-- AI detection
 local function isAICountry(c)
     local l = c:FindFirstChild("Leader")
     return l and l.Value == (c.Name .. "AI")
@@ -120,27 +121,18 @@ local function getAICountries()
     return list
 end
 
--- Attempt one resource trade
+-- Sell one resource to one AI, using only net-income and balance checks
 local function sellResourceToAI(myCountry, resourceName, aiName)
     local price = ResourcePrices[resourceName]
     if not price then return end
 
-    local resFolder = myCountry:FindFirstChild("Resources")
-    if not resFolder then return end
-    local res = resFolder:FindFirstChild(resourceName)
-    if not (res and res:IsA("NumberValue")) then return end
-
-    -- Ensure they produce something
-    local flow = res:FindFirstChild("Flow")
-    if not flow or flow.Value <= 0 then return end
-
-    -- Check AI debt only
-    local econ    = workspace.CountryData:FindFirstChild(aiName):FindFirstChild("Economy")
+    -- Check AI debt
+    local econ = workspace.CountryData:FindFirstChild(aiName):FindFirstChild("Economy")
     if not econ then return end
     local balance = econ:FindFirstChild("Balance") and econ.Balance.Value or 0
     if balance < 0 then return end
 
-    -- Compute net income = Revenue – Expenses
+    -- Compute AI net income = sum(Revenue) - sum(Expenses)
     local netIncome = 0
     if econ:FindFirstChild("Revenue") then
         netIncome = sumFolder(econ.Revenue)
@@ -150,38 +142,50 @@ local function sellResourceToAI(myCountry, resourceName, aiName)
     end
     if netIncome <= 0 then return end
 
-    -- Determine amount purely by net income
+    -- Determine maximum by net-income
     local estimate = netIncome / price
-    local amt      = estimate - 1
+    local amt = estimate - 1
     if amt <= 0 then return end
 
+    -- If AI no longer produces this resource (flow ≤ 0), cap at 5 units
+    local aiResources = workspace.CountryData:FindFirstChild(aiName):FindFirstChild("Resources")
+    if aiResources then
+        local aiRes = aiResources:FindFirstChild(resourceName)
+        if aiRes and aiRes:FindFirstChild("Flow") and aiRes.Flow.Value <= 0
+           and resourceName ~= "Consumer Goods" then
+            amt = math.min(amt, 5)
+        end
+    end
+
     local value = amt * price
+    -- Ensure AI retains at least MIN_POST_NET after trade
     if (netIncome - value) < MIN_POST_NET then
         return
     end
 
-    -- Fire the trade
-    print(("Trading %.4f units of %s to %s for $%.2f (AI net income before: $%.2f)"):format(
+    -- Execute trade
+    print(("Trading %.4f units of %s to %s for $%.2f (netIncome $%.2f)"):format(
         amt, resourceName, aiName, value, netIncome
     ))
     GameManager.ManageAlliance:FireServer(aiName, "ResourceTrade", {
         resourceName, "Sell", amt, 1, "Trade"
     })
+
+    task.wait(TRADE_DELAY)
 end
 
--- Sell _each_ selected resource to a single AI, waiting 2s between trades
+-- Sell all selected resources to one AI
 local function sellAllToAI(myCountry, aiName)
     for resourceName in pairs(selectedResources) do
         sellResourceToAI(myCountry, resourceName, aiName)
-        task.wait(2)
     end
 end
 
--- Heartbeat: process one AI per loop, 2s wait afterward
+-- Heartbeat: process one AI per iteration, 2s delay between AIs
 local function heartbeat()
     if not tradingEnabled then return end
 
-    -- Find the player's country
+    -- Find player's country
     local myCountry
     for _, c in ipairs(workspace.CountryData:GetChildren()) do
         if c.Leader and c.Leader.Value == player.Name then
@@ -191,7 +195,7 @@ local function heartbeat()
     end
     if not myCountry then return end
 
-    -- If all AI done, stop
+    -- All AI done?
     if aiIndex > #aiList then
         stopTrading()
         StarterGui:SetCore("SendNotification", {
@@ -208,10 +212,10 @@ local function heartbeat()
     sellAllToAI(myCountry, aiName)
 
     aiIndex += 1
-    task.wait(2)
+    task.wait(TRADE_DELAY)
 end
 
--- Start/Stop functions
+-- Start/stop functions
 function startTrading()
     aiList  = getAICountries()
     aiIndex = 1
@@ -225,4 +229,3 @@ function stopTrading()
 end
 
 print("Advanced Trading ready; toggle on to begin.")
-
