@@ -76,28 +76,27 @@ local player      = Players.LocalPlayer
 
 -- Price data
 local ResourcePrices = {
-    Iron                = {Sell=30400,    Buy=38000},
-    Aluminum            = {Sell=30400,    Buy=38000},
-    Oil                 = {Sell=32000,    Buy=40000},
-    Phosphate           = {Sell=33200,    Buy=41500},
-    Copper              = {Sell=33600,    Buy=42000},
-    Chromium            = {Sell=38000,    Buy=47500},
-    Gold                = {Sell=43200,    Buy=54000},
-    Diamond             = {Sell=69600,    Buy=87000},
-    Tungsten            = {Sell=76800,    Buy=96000},
-    Titanium            = {Sell=81600,    Buy=102000},
-    Uranium             = {Sell=420000,   Buy=525000},
-    Steel               = {Sell=60000,    Buy=75000},
-    ["Consumer Goods"]  = {Sell=65920,    Buy=82400},
-    Fertilizer          = {Sell=67200,    Buy=84400},
-    ["Motor Parts"]     = {Sell=73600,    Buy=92000},
-    Electronics         = {Sell=81600,    Buy=102000},
-    ["Aircraft Parts"]  = {Sell=83200,    Buy=104000},
-    ["Enriched Uranium"]= {Sell=96000000, Buy=120000000},
+    Iron                = {Sell=30400},
+    Aluminum            = {Sell=30400},
+    Oil                 = {Sell=32000},
+    Phosphate           = {Sell=33200},
+    Copper              = {Sell=33600},
+    Chromium            = {Sell=38000},
+    Gold                = {Sell=43200},
+    Diamond             = {Sell=69600},
+    Tungsten            = {Sell=76800},
+    Titanium            = {Sell=81600},
+    Uranium             = {Sell=420000},
+    Steel               = {Sell=60000},
+    ["Consumer Goods"]  = {Sell=65920},
+    Fertilizer          = {Sell=67200},
+    ["Motor Parts"]     = {Sell=73600},
+    Electronics         = {Sell=81600},
+    ["Aircraft Parts"]  = {Sell=83200},
+    ["Enriched Uranium"]= {Sell=96000000},
 }
 
 -- Constants
-local MIN_TRADE_VALUE   = 1
 local TRADE_COOLDOWN    = 15
 local TRADE_FLOW_WINDOW = 5
 local MIN_POST_NET      = 1000
@@ -117,7 +116,7 @@ local function sumFolder(folder)
     return total
 end
 
--- AI detection
+-- Identify AI nations
 local function isAICountry(c)
     local leader = c:FindFirstChild("Leader")
     return leader and leader.Value == (c.Name .. "AI")
@@ -133,7 +132,7 @@ local function getAICountries()
     return list
 end
 
--- Core trade function (logging only real trades)
+-- Core trade function (log only real trades)
 local function sellResourceToAI(myCountry, resource, aiName)
     local name    = resource.Name
     local price   = ResourcePrices[name]
@@ -146,34 +145,30 @@ local function sellResourceToAI(myCountry, resource, aiName)
         return
     end
 
-    -- Economy
+    -- Check debt only
     local econ    = workspace.CountryData:FindFirstChild(aiName):FindFirstChild("Economy")
     if not econ then return end
     local balance = econ:FindFirstChild("Balance") and econ.Balance.Value or 0
     if balance < 0 then return end
 
-    -- Revenue & expenses
+    -- Calculate net income
     local revFld = econ:FindFirstChild("Revenue")
     local expFld = econ:FindFirstChild("Expenses")
-    local revenue  = revFld and sumFolder(revFld) or 0
-    local expenses = expFld and sumFolder(expFld) or 0
-    local netIncome= revenue - expenses
+    local netIncome = (
+        (revFld  and sumFolder(revFld)  or 0)
+      - (expFld and sumFolder(expFld) or 0)
+    )
     if netIncome <= 0 then return end
 
     -- Determine estimated amount
     local cap     = bypassFlowLimit and math.huge or (flowVal * TRADE_FLOW_WINDOW)
-    local maxByBal= balance / price.Sell
-    local maxByInc= netIncome / price.Sell
-    local estimate= math.min(cap, maxByBal, maxByInc)
-    if estimate * price.Sell < MIN_TRADE_VALUE then return end
-
-    -- Send 1 unit less than estimate
-    local amt = estimate - 1
+    local estimate= netIncome / price.Sell
+    local amt     = math.min(cap, estimate)
     if amt <= 0 then return end
-    local value = amt * price.Sell
 
     -- Post-trade net income check
-    if netIncome - value < MIN_POST_NET then
+    local value   = amt * price.Sell
+    if (netIncome - value) < MIN_POST_NET then
         return
     end
 
@@ -183,7 +178,7 @@ local function sellResourceToAI(myCountry, resource, aiName)
     lastTradeTime[name] = now
 end
 
--- Sell all selected resources to one AI
+-- Sell selected resources to one AI
 local function sellAllToAI(myCountry, aiName)
     for name in pairs(selectedResources) do
         local res = myCountry:FindFirstChild("Resources") and myCountry.Resources:FindFirstChild(name)
@@ -197,7 +192,7 @@ end
 local function heartbeat()
     if not tradingEnabled then return end
 
-    -- Find your country once per loop
+    -- Find your country
     local myCountry
     for _, c in ipairs(workspace.CountryData:GetChildren()) do
         if c.Leader and c.Leader.Value == player.Name then
@@ -207,7 +202,7 @@ local function heartbeat()
     end
     if not myCountry then return end
 
-    -- Completed all AI
+    -- Completed all AI?
     if aiIndex > #aiList then
         stopTrading()
         StarterGui:SetCore("SendNotification", {
@@ -218,13 +213,13 @@ local function heartbeat()
         return
     end
 
-    -- Process a single AI
+    -- Process one AI
     local aiName = aiList[aiIndex]
     print("► Processing AI:", aiName)
     sellAllToAI(myCountry, aiName)
     aiIndex = aiIndex + 1
 
-    -- Wait 3 seconds before next AI
+    -- Wait before next AI
     task.wait(3)
 end
 
