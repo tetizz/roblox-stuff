@@ -1,18 +1,17 @@
 -- Obsidian UI setup
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))()
-local Window = Library:CreateWindow({
-    Title = "Industrial Head Start",
-    Footer = "v1.0.0",
+local Window  = Library:CreateWindow({
+    Title         = "Advanced Trading",
+    Footer        = "v1.0.0",
     ToggleKeybind = Enum.KeyCode.RightControl,
-    Center = true,
-    AutoShow = true
+    Center        = true,
+    AutoShow      = true,
 })
 
--- Trading tab & settings
-local TradingTab     = Window:AddTab("Trading", "shopping-cart", "Automated resource trading")
-local SettingsGroup  = TradingTab:AddLeftGroupbox("Auto-Trade Settings", "settings")
+-- UI Elements
+local TradingTab    = Window:AddTab("Trading", "shopping-cart", "Automated resource trading")
+local SettingsGroup = TradingTab:AddLeftGroupbox("Auto-Trade Settings", "settings")
 
--- Toggles
 local tradingEnabled  = false
 local bypassFlowLimit = false
 
@@ -22,7 +21,7 @@ SettingsGroup:AddToggle("EnableAutoTrade", {
     Callback = function(v)
         tradingEnabled = v
         if v then startTrading() else stopTrading() end
-    end
+    end,
 })
 
 SettingsGroup:AddToggle("BypassFlowLimit", {
@@ -30,24 +29,61 @@ SettingsGroup:AddToggle("BypassFlowLimit", {
     Default = false,
     Callback = function(v)
         bypassFlowLimit = v
-    end
+    end,
+})
+
+-- Populate dropdown from Assets.Resources
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local resourcesFolder   = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Resources")
+local resourceNames = {}
+for _, r in ipairs(resourcesFolder:GetChildren()) do
+    table.insert(resourceNames, r.Name)
+end
+table.sort(resourceNames)
+
+local selectedResources = {}
+SettingsGroup:AddDropdown("TradeResources", {
+    Values   = resourceNames,
+    Default  = resourceNames,
+    Multi    = true,
+    Text     = "Select Resources",
+    Tooltip  = "Which resources to trade",
+    Callback = function(selection)
+        selectedResources = {}
+        for _, name in ipairs(selection) do
+            selectedResources[name] = true
+        end
+    end,
 })
 
 -- Services & state
-local RunService    = game:GetService("RunService")
-local StarterGui    = game:GetService("StarterGui")
-local Players       = game:GetService("Players")
-local GameManager   = workspace:WaitForChild("GameManager")
-local player        = Players.LocalPlayer
+local RunService  = game:GetService("RunService")
+local StarterGui  = game:GetService("StarterGui")
+local Players     = game:GetService("Players")
+local GameManager = workspace:WaitForChild("GameManager")
+local player      = Players.LocalPlayer
 
+-- Price data
 local ResourcePrices = {
-    ["Electronics"]    = { Sell = 81600 },
-    ["Consumer Goods"] = { Sell = 65920 },
-}
+    Iron            = { Sell = 30400,     Buy = 38000     },
+    Aluminum        = { Sell = 30400,     Buy = 38000     },
+    Oil             = { Sell = 32000,     Buy = 40000     },
+    Phosphate       = { Sell = 33200,     Buy = 41500     },
+    Copper          = { Sell = 33600,     Buy = 42000     },
+    Chromium        = { Sell = 38000,     Buy = 47500     },
+    Gold            = { Sell = 43200,     Buy = 54000     },
+    Diamond         = { Sell = 69600,     Buy = 87000     },
+    Tungsten        = { Sell = 76800,     Buy = 96000     },
+    Titanium        = { Sell = 81600,     Buy = 102000    },
+    Uranium         = { Sell = 420000,    Buy = 525000    },
 
-local sellableResources = {
-    ["Electronics"]    = true,
-    ["Consumer Goods"] = true,
+    Steel           = { Sell = 60000,     Buy = 75000     },
+    ["Consumer Goods"] = { Sell = 65920,  Buy = 82400     },
+    Fertilizer      = { Sell = 67200,     Buy = 84400     },
+    ["Motor Parts"] = { Sell = 73600,     Buy = 92000     },
+    Electronics     = { Sell = 81600,     Buy = 102000    },
+    ["Aircraft Parts"] = { Sell = 83200,  Buy = 104000    },
+    ["Enriched Uranium"] = { Sell = 96000000, Buy = 120000000 },
 }
 
 local MIN_TRADE_VALUE   = 1
@@ -59,11 +95,11 @@ local aiList, aiIndex, connection
 
 -- Helpers
 local function sumFolder(folder)
-    local total = 0
+    local t = 0
     for _, v in ipairs(folder:GetChildren()) do
-        if v:IsA("NumberValue") then total += v.Value end
+        if v:IsA("NumberValue") then t += v.Value end
     end
-    return total
+    return t
 end
 
 local function isAICountry(c)
@@ -72,77 +108,64 @@ local function isAICountry(c)
 end
 
 local function getAICountries()
-    local list = {}
+    local t = {}
     for _, c in ipairs(workspace.CountryData:GetChildren()) do
-        if isAICountry(c) then table.insert(list, c.Name) end
+        if isAICountry(c) then table.insert(t, c.Name) end
     end
-    return list
+    return t
 end
 
 -- Core trading logic
 local function sellResourceToAI(myCountry, resource, aiName)
-    local resName = resource.Name
-    if not sellableResources[resName] then return end
-
-    local priceInfo = ResourcePrices[resName]
-    if not priceInfo then return end
-    local unitPrice = priceInfo.Sell
+    local name = resource.Name
+    if not selectedResources[name] then return end
+    local price = ResourcePrices[name]
+    if not price then return end
 
     local flowObj = resource:FindFirstChild("Flow")
     if not flowObj or flowObj.Value <= 0 then return end
 
     local now = os.time()
-    if lastTradeTime[resName] and now - lastTradeTime[resName] < TRADE_COOLDOWN then
-        return
-    end
+    if lastTradeTime[name] and now - lastTradeTime[name] < TRADE_COOLDOWN then return end
 
-    local ai = workspace.CountryData:FindFirstChild(aiName)
-    if not ai then return end
-    local econ = ai:FindFirstChild("Economy")
+    local ai   = workspace.CountryData:FindFirstChild(aiName)
+    local econ = ai and ai:FindFirstChild("Economy")
     if not econ then return end
 
-    local balance = econ:FindFirstChild("Balance") and econ.Balance.Value or 0
-    if balance < 0 then return end  -- skip debt
+    local balance = econ.Balance and econ.Balance.Value or 0
+    if balance < 0 then return end
 
-    local revenue  = econ:FindFirstChild("Revenue")  and sumFolder(econ.Revenue)  or 0
-    local expenses = econ:FindFirstChild("Expenses") and sumFolder(econ.Expenses) or 0
-    local income   = revenue - expenses
-    if income <= 0 then return end
+    local rev = econ.Revenue and sumFolder(econ.Revenue) or 0
+    local exp = econ.Expenses and sumFolder(econ.Expenses) or 0
+    local inc = rev - exp
+    if inc <= 0 then return end
 
-    local flowCap = bypassFlowLimit and math.huge or (flowObj.Value * TRADE_FLOW_WINDOW)
-    local maxByBal = balance / unitPrice
-    local maxByInc = income / unitPrice
-    local sellAmount = math.min(flowCap, maxByBal, maxByInc)
-    local tradeValue = sellAmount * unitPrice
+    local cap = bypassFlowLimit and math.huge or (flowObj.Value * TRADE_FLOW_WINDOW)
+    local mb  = balance / price.Sell
+    local mi  = inc / price.Sell
+    local amt = math.min(cap, mb, mi)
+    if amt * price.Sell < MIN_TRADE_VALUE then return end
 
-    if tradeValue < MIN_TRADE_VALUE then return end
-
-    local args = {
-        aiName,
-        "ResourceTrade",
-        { resName, "Sell", sellAmount, 1, "Trade" }
-    }
-    GameManager.ManageAlliance:FireServer(unpack(args))
-    lastTradeTime[resName] = now
+    GameManager.ManageAlliance:FireServer(aiName, "ResourceTrade", { name, "Sell", amt, 1, "Trade" })
+    lastTradeTime[name] = now
 end
 
-local function sellAllToAI(myCountry, aiName)
-    local resFolder = myCountry:FindFirstChild("Resources")
-    if not resFolder then return end
-    for _, res in ipairs(resFolder:GetChildren()) do
-        if res:IsA("NumberValue") and sellableResources[res.Name] then
-            sellResourceToAI(myCountry, res, aiName)
+local function sellAllToAI(country, aiName)
+    local res = country:FindFirstChild("Resources")
+    if not res then return end
+    for _, v in ipairs(res:GetChildren()) do
+        if v:IsA("NumberValue") then
+            sellResourceToAI(country, v, aiName)
         end
     end
 end
 
--- Heartbeat loop
-local function heartbeatTrade()
+-- Heartbeat trading
+local function heartbeat()
     if not tradingEnabled then return end
-
     local myCountry
     for _, c in ipairs(workspace.CountryData:GetChildren()) do
-        if c:FindFirstChild("Leader") and c.Leader.Value == player.Name then
+        if c.Leader and c.Leader.Value == player.Name then
             myCountry = c
             break
         end
@@ -154,23 +177,21 @@ local function heartbeatTrade()
         StarterGui:SetCore("SendNotification", {
             Title    = "Trade Complete",
             Text     = "Finished trading with all available AI countries.",
-            Duration = 5
+            Duration = 5,
         })
         return
     end
 
-    local targetAI = aiList[aiIndex]
-    sellAllToAI(myCountry, targetAI)
+    sellAllToAI(myCountry, aiList[aiIndex])
     aiIndex += 1
 end
 
--- Control functions
 function startTrading()
     aiList  = getAICountries()
     aiIndex = 1
     lastTradeTime = {}
     if connection then connection:Disconnect() end
-    connection = RunService.Heartbeat:Connect(heartbeatTrade)
+    connection = RunService.Heartbeat:Connect(heartbeat)
 end
 
 function stopTrading()
