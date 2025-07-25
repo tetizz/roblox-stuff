@@ -1,4 +1,4 @@
--- Advanced Trading
+-- Advanced Trading (net-income–only version)
 
 print("=== Advanced Trading script loaded ===")
 
@@ -36,7 +36,7 @@ SettingsGroup:AddDropdown("TradeResources", {
     Tooltip  = "Which resources to trade",
     Callback = function(map)
         selectedResources = {}
-        for name,on in pairs(map) do
+        for name, on in pairs(map) do
             if on then selectedResources[name] = true end
         end
         local list = {}
@@ -74,7 +74,7 @@ local Players     = game:GetService("Players")
 local GameManager = workspace:WaitForChild("GameManager")
 local player      = Players.LocalPlayer
 
--- Price data
+-- Price data (only Sell needed)
 local ResourcePrices = {
     Iron                = {Sell=30400},
     Aluminum            = {Sell=30400},
@@ -98,23 +98,11 @@ local ResourcePrices = {
 
 -- Constants
 local TRADE_COOLDOWN    = 15
-local TRADE_FLOW_WINDOW = 5
 local MIN_POST_NET      = 1000
 
 -- State
 local lastTradeTime = {}
 local aiList, aiIndex, connection
-
--- Helper: sum direct children NumberValue/IntValue
-local function sumFolder(folder)
-    local total = 0
-    for _, v in ipairs(folder:GetChildren()) do
-        if v:IsA("NumberValue") or v:IsA("IntValue") then
-            total = total + v.Value
-        end
-    end
-    return total
-end
 
 -- Identify AI nations
 local function isAICountry(c)
@@ -132,10 +120,10 @@ local function getAICountries()
     return list
 end
 
--- Core trade function (log only real trades)
+-- Core trading function (net-income only)
 local function sellResourceToAI(myCountry, resource, aiName)
     local name    = resource.Name
-    local price   = ResourcePrices[name]
+    local price   = ResourcePrices[name] and ResourcePrices[name].Sell
     local flowVal = resource:FindFirstChild("Flow") and resource.Flow.Value or 0
     if not price or flowVal <= 0 then return end
 
@@ -145,35 +133,41 @@ local function sellResourceToAI(myCountry, resource, aiName)
         return
     end
 
-    -- Check debt only
+    -- Economy & debt check
     local econ    = workspace.CountryData:FindFirstChild(aiName):FindFirstChild("Economy")
     if not econ then return end
     local balance = econ:FindFirstChild("Balance") and econ.Balance.Value or 0
     if balance < 0 then return end
 
-    -- Calculate net income
-    local revFld = econ:FindFirstChild("Revenue")
-    local expFld = econ:FindFirstChild("Expenses")
-    local netIncome = (
-        (revFld  and sumFolder(revFld)  or 0)
-      - (expFld and sumFolder(expFld) or 0)
-    )
+    -- Compute net income = sum(Revenue) – sum(Expenses)
+    local netIncome = 0
+    if econ:FindFirstChild("Revenue") then
+        for _, v in ipairs(econ.Revenue:GetChildren()) do
+            if v:IsA("NumberValue") then netIncome += v.Value end
+        end
+    end
+    if econ:FindFirstChild("Expenses") then
+        for _, v in ipairs(econ.Expenses:GetChildren()) do
+            if v:IsA("NumberValue") then netIncome -= v.Value end
+        end
+    end
     if netIncome <= 0 then return end
 
-    -- Determine estimated amount
-    local cap     = bypassFlowLimit and math.huge or (flowVal * TRADE_FLOW_WINDOW)
-    local estimate= netIncome / price.Sell
-    local amt     = math.min(cap, estimate)
+    -- Determine amount purely from netIncome
+    local estimate = netIncome / price
+    local amt      = estimate - 1
     if amt <= 0 then return end
 
-    -- Post-trade net income check
-    local value   = amt * price.Sell
+    local value = amt * price
+    -- ensure at least MIN_POST_NET remains after trade
     if (netIncome - value) < MIN_POST_NET then
         return
     end
 
     -- Execute trade
-    print(("Trading %.4f units of %s to %s for $%.2f"):format(amt, name, aiName, value))
+    print(("Trading %.4f units of %s to %s for $%.2f (netIncome $%.2f)"):format(
+        amt, name, aiName, value, netIncome
+    ))
     GameManager.ManageAlliance:FireServer(aiName, "ResourceTrade", {name, "Sell", amt, 1, "Trade"})
     lastTradeTime[name] = now
 end
@@ -192,7 +186,7 @@ end
 local function heartbeat()
     if not tradingEnabled then return end
 
-    -- Find your country
+    -- find your country
     local myCountry
     for _, c in ipairs(workspace.CountryData:GetChildren()) do
         if c.Leader and c.Leader.Value == player.Name then
@@ -202,7 +196,7 @@ local function heartbeat()
     end
     if not myCountry then return end
 
-    -- Completed all AI?
+    -- finished?
     if aiIndex > #aiList then
         stopTrading()
         StarterGui:SetCore("SendNotification", {
@@ -213,17 +207,17 @@ local function heartbeat()
         return
     end
 
-    -- Process one AI
+    -- process one AI
     local aiName = aiList[aiIndex]
     print("► Processing AI:", aiName)
     sellAllToAI(myCountry, aiName)
-    aiIndex = aiIndex + 1
+    aiIndex += 1
 
-    -- Wait before next AI
+    -- delay before next
     task.wait(3)
 end
 
--- Start / stop
+-- Start/stop
 function startTrading()
     aiList  = getAICountries()
     aiIndex = 1
