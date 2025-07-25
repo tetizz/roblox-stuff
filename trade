@@ -1,25 +1,25 @@
--- Advanced Trading (Debug with post-trade net income check, delay, and detailed prints)
+-- Advanced Trading (Final)
 
-print("=== Advanced Trading debug start ===")
+print("=== Advanced Trading script loaded ===")
 
 -- Obsidian UI setup
 local Library = loadstring(game:HttpGet(
     "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"
 ))()
 local Window = Library:CreateWindow({
-    Title         = "Advanced Trading (Debug)",
+    Title         = "Advanced Trading",
     Footer        = "v1.0.0",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center        = true,
     AutoShow      = true,
 })
-print("[UI] Library loaded, window created")
+print("[UI] Window created")
 
 -- Trading tab & settings
 local TradingTab    = Window:AddTab("Trading","shopping-cart","Automated resource trading")
 local SettingsGroup = TradingTab:AddLeftGroupbox("Auto-Trade Settings","settings")
 
--- Populate dropdown
+-- Populate resources dropdown
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local resourcesFolder   = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Resources")
 local resourceNames     = {}
@@ -29,42 +29,51 @@ end
 table.sort(resourceNames)
 
 local selectedResources = {}
+
 SettingsGroup:AddDropdown("TradeResources", {
-    Values  = resourceNames,
-    Default = {},
-    Multi   = true,
-    Text    = "Select Resources",
-    Tooltip = "Which resources to trade",
+    Values   = resourceNames,
+    Default  = {},
+    Multi    = true,
+    Text     = "Select Resources",
+    Tooltip  = "Which resources to trade",
     Callback = function(selMap)
         selectedResources = {}
-        for name,on in pairs(selMap) do
+        for name, on in pairs(selMap) do
             if on then selectedResources[name] = true end
         end
         local list = {}
-        for name in pairs(selectedResources) do list[#list+1]=name end
-        print("[Dropdown] Selected:", #list>0 and table.concat(list,", ") or "none")
+        for name in pairs(selectedResources) do
+            table.insert(list, name)
+        end
+        if #list > 0 then
+            print("Resources selected:", table.concat(list, ", "))
+        else
+            print("No resources selected")
+        end
     end,
 })
 print("[UI] Resource dropdown added")
 
 -- Toggles
 local tradingEnabled, bypassFlowLimit = false, false
+
 SettingsGroup:AddToggle("EnableAutoTrade", {
     Text    = "Enable Auto-Trade",
     Default = false,
     Callback = function(v)
         tradingEnabled = v
-        print("[Toggle] EnableAutoTrade =", v)
+        print("Enable Auto-Trade set to", v)
         if v then startTrading() else stopTrading() end
     end,
 })
 print("[UI] EnableAutoTrade toggle added")
+
 SettingsGroup:AddToggle("BypassFlowLimit", {
     Text    = "Bypass Flow Limit",
     Default = false,
     Callback = function(v)
         bypassFlowLimit = v
-        print("[Toggle] BypassFlowLimit =", v)
+        print("Bypass Flow Limit set to", v)
     end,
 })
 print("[UI] BypassFlowLimit toggle added")
@@ -75,38 +84,42 @@ local StarterGui  = game:GetService("StarterGui")
 local Players     = game:GetService("Players")
 local GameManager = workspace:WaitForChild("GameManager")
 local player      = Players.LocalPlayer
+print("[Services] Initialized")
 
 -- Price data
 local ResourcePrices = {
-    Iron                = {Sell=30400,Buy=38000},
-    Aluminum            = {Sell=30400,Buy=38000},
-    Oil                 = {Sell=32000,Buy=40000},
-    Phosphate           = {Sell=33200,Buy=41500},
-    Copper              = {Sell=33600,Buy=42000},
-    Chromium            = {Sell=38000,Buy=47500},
-    Gold                = {Sell=43200,Buy=54000},
-    Diamond             = {Sell=69600,Buy=87000},
-    Tungsten            = {Sell=76800,Buy=96000},
-    Titanium            = {Sell=81600,Buy=102000},
-    Uranium             = {Sell=420000,Buy=525000},
-    Steel               = {Sell=60000,Buy=75000},
-    ["Consumer Goods"]  = {Sell=65920,Buy=82400},
-    Fertilizer          = {Sell=67200,Buy=84400},
-    ["Motor Parts"]     = {Sell=73600,Buy=92000},
-    Electronics         = {Sell=81600,Buy=102000},
-    ["Aircraft Parts"]  = {Sell=83200,Buy=104000},
-    ["Enriched Uranium"]= {Sell=96000000,Buy=120000000},
+    Iron                = {Sell=30400,     Buy=38000},
+    Aluminum            = {Sell=30400,     Buy=38000},
+    Oil                 = {Sell=32000,     Buy=40000},
+    Phosphate           = {Sell=33200,     Buy=41500},
+    Copper              = {Sell=33600,     Buy=42000},
+    Chromium            = {Sell=38000,     Buy=47500},
+    Gold                = {Sell=43200,     Buy=54000},
+    Diamond             = {Sell=69600,     Buy=87000},
+    Tungsten            = {Sell=76800,     Buy=96000},
+    Titanium            = {Sell=81600,     Buy=102000},
+    Uranium             = {Sell=420000,    Buy=525000},
+    Steel               = {Sell=60000,     Buy=75000},
+    ["Consumer Goods"]  = {Sell=65920,     Buy=82400},
+    Fertilizer          = {Sell=67200,     Buy=84400},
+    ["Motor Parts"]     = {Sell=73600,     Buy=92000},
+    Electronics         = {Sell=81600,     Buy=102000},
+    ["Aircraft Parts"]  = {Sell=83200,     Buy=104000},
+    ["Enriched Uranium"]= {Sell=96000000,  Buy=120000000},
 }
+print("[Data] Price table loaded")
 
+-- Constants
 local MIN_TRADE_VALUE   = 1
 local TRADE_COOLDOWN    = 15
 local TRADE_FLOW_WINDOW = 5
 local MIN_POST_NET      = 1000  -- require at least $1,000 net after trade
 
+-- State
 local lastTradeTime = {}
 local aiList, aiIndex, connection
 
--- Helper: sum all descendant NumberValue/IntValue
+-- Helper: sum all NumberValue/IntValue under a folder
 local function sumValues(folder)
     local total = 0
     for _, obj in ipairs(folder:GetDescendants()) do
@@ -117,29 +130,31 @@ local function sumValues(folder)
     return total
 end
 
--- Identify AI countries
+-- Identify AI-controlled nations
 local function isAICountry(c)
     local leader = c:FindFirstChild("Leader")
-    return leader and leader.Value == (c.Name.."AI")
+    return leader and leader.Value == (c.Name .. "AI")
 end
 
 local function getAICountries()
     local list = {}
     for _, c in ipairs(workspace.CountryData:GetChildren()) do
-        if isAICountry(c) then list[#list+1] = c.Name end
+        if isAICountry(c) then
+            table.insert(list, c.Name)
+        end
     end
     print("[AI List]", unpack(list))
     return list
 end
 
--- Core trading logic
+-- Core trading function
 local function sellResourceToAI(myCountry, resource, aiName)
     local name = resource.Name
     print(("--> %s → %s"):format(name, aiName))
 
-    -- Price and flow
+    -- Price & flow
     local price = ResourcePrices[name]
-    local flowVal = resource.Flow and resource.Flow.Value or 0
+    local flowVal = (resource:FindFirstChild("Flow") and resource.Flow.Value) or 0
     if not price or flowVal <= 0 then
         print("   skip: no price or flow")
         return
@@ -152,26 +167,30 @@ local function sellResourceToAI(myCountry, resource, aiName)
         return
     end
 
-    -- Get AI economy
+    -- Economy check
     local econ = workspace.CountryData:FindFirstChild(aiName):FindFirstChild("Economy")
     if not econ then
         print("   skip: no Economy for", aiName)
         return
     end
 
-    local balance = econ.Balance and econ.Balance.Value or 0
+    local balance = (econ:FindFirstChild("Balance") and econ.Balance.Value) or 0
     if balance < 0 then
-        print("   skip: in debt")
+        print("   skip: AI in debt")
         return
     end
 
-    -- Sum revenue & expenses
-    local revenue  = econ.Revenue  and sumValues(econ.Revenue)  or 0
-    local expenses = econ.Expenses and sumValues(econ.Expenses) or 0
+    -- Revenue & expenses
+    local revenue  = (econ:FindFirstChild("Revenue")  and sumValues(econ.Revenue))  or 0
+    local expenses = (econ:FindFirstChild("Expenses") and sumValues(econ.Expenses)) or 0
     local netIncome= revenue - expenses
     print(("   rev=%d, exp=%d, preNet=%d"):format(revenue, expenses, netIncome))
+    if netIncome <= 0 then
+        print("   skip: no net income")
+        return
+    end
 
-    -- Compute trade amount and value
+    -- Compute trade amount & value
     local cap   = bypassFlowLimit and math.huge or (flowVal * TRADE_FLOW_WINDOW)
     local mb    = balance / price.Sell
     local mi    = netIncome / price.Sell
@@ -183,7 +202,7 @@ local function sellResourceToAI(myCountry, resource, aiName)
         return
     end
 
-    -- Check post-trade net income
+    -- Post-trade net income check
     local postNet = netIncome - value
     print(("   postNetIncome=%.2f"):format(postNet))
     if postNet < MIN_POST_NET then
@@ -192,38 +211,46 @@ local function sellResourceToAI(myCountry, resource, aiName)
     end
 
     -- Perform trade
-    print(("   executing: %s x %.4f for $%.2f"):format(name, amt, value))
+    print(("   Trading %.4f units of %s to %s for $%.2f"):format(amt, name, aiName, value))
     local args = {aiName, "ResourceTrade", {name, "Sell", amt, 1, "Trade"}}
     GameManager.ManageAlliance:FireServer(unpack(args))
     lastTradeTime[name] = now
 
     -- Delay before next trade
-    task.wait(0.3)
+    task.wait(3)
 end
 
--- Sell only selected resources
+-- Sell only selected resources to a single AI
 local function sellAllToAI(myCountry, aiName)
-    local selList = {}
-    for r in pairs(selectedResources) do selList[#selList+1] = r end
+    local sel = {}
+    for r in pairs(selectedResources) do
+        table.insert(sel, r)
+    end
     print(("sellAllToAI: %s selected: %s"):format(
-        aiName, #selList>0 and table.concat(selList,", ") or "none"
+        aiName,
+        #sel > 0 and table.concat(sel, ", ") or "none"
     ))
+
     local resFolder = myCountry:FindFirstChild("Resources")
     if not resFolder then
-        print("   skip: no Resources")
+        print("   skip: no Resources folder")
         return
     end
+
     for name in pairs(selectedResources) do
         local res = resFolder:FindFirstChild(name)
+        print("   lookup:", name, res and "found" or "missing")
         if res and res:IsA("NumberValue") then
             sellResourceToAI(myCountry, res, aiName)
         end
     end
 end
 
--- Heartbeat
+-- Heartbeat loop
 local function heartbeat()
     if not tradingEnabled then return end
+
+    -- find your country
     local myCountry
     for _, c in ipairs(workspace.CountryData:GetChildren()) do
         if c.Leader and c.Leader.Value == player.Name then
@@ -231,24 +258,29 @@ local function heartbeat()
             break
         end
     end
-    if not myCountry then return end
+    if not myCountry then
+        print("   skip: my country not found")
+        return
+    end
 
+    -- if done
     if aiIndex > #aiList then
-        print("All AI done, stopping")
+        print("All AI processed, stopping")
         stopTrading()
         StarterGui:SetCore("SendNotification", {
-            Title="Trade Complete",
-            Text ="Finished trading with all AI countries.",
-            Duration=5,
+            Title    = "Trade Complete",
+            Text     = "Finished trading with all available AI countries.",
+            Duration = 5,
         })
         return
     end
 
+    -- sell to one AI
     sellAllToAI(myCountry, aiList[aiIndex])
     aiIndex = aiIndex + 1
 end
 
--- Control
+-- Start/Stop functions
 function startTrading()
     print("startTrading called")
     aiList  = getAICountries()
@@ -264,4 +296,4 @@ function stopTrading()
     if connection then connection:Disconnect() end
 end
 
-print("=== Debug version loaded, awaiting toggles ===")
+print("=== Advanced Trading ready; toggle to begin ===")
