@@ -1,0 +1,182 @@
+-- Obsidian UI setup
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))()
+local Window = Library:CreateWindow({
+    Title = "Industrial Head Start",
+    Footer = "v1.0.0",
+    ToggleKeybind = Enum.KeyCode.RightControl,
+    Center = true,
+    AutoShow = true
+})
+
+-- Trading tab & settings
+local TradingTab     = Window:AddTab("Trading", "shopping-cart", "Automated resource trading")
+local SettingsGroup  = TradingTab:AddLeftGroupbox("Auto-Trade Settings", "settings")
+
+-- Toggles
+local tradingEnabled  = false
+local bypassFlowLimit = false
+
+SettingsGroup:AddToggle("EnableAutoTrade", {
+    Text    = "Enable Auto-Trade",
+    Default = false,
+    Callback = function(v)
+        tradingEnabled = v
+        if v then startTrading() else stopTrading() end
+    end
+})
+
+SettingsGroup:AddToggle("BypassFlowLimit", {
+    Text    = "Bypass Flow Limit",
+    Default = false,
+    Callback = function(v)
+        bypassFlowLimit = v
+    end
+})
+
+-- Services & state
+local RunService    = game:GetService("RunService")
+local StarterGui    = game:GetService("StarterGui")
+local Players       = game:GetService("Players")
+local GameManager   = workspace:WaitForChild("GameManager")
+local player        = Players.LocalPlayer
+
+local ResourcePrices = {
+    ["Electronics"]    = { Sell = 81600 },
+    ["Consumer Goods"] = { Sell = 65920 },
+}
+
+local sellableResources = {
+    ["Electronics"]    = true,
+    ["Consumer Goods"] = true,
+}
+
+local MIN_TRADE_VALUE   = 1
+local TRADE_COOLDOWN    = 15
+local TRADE_FLOW_WINDOW = 5
+
+local lastTradeTime = {}
+local aiList, aiIndex, connection
+
+-- Helpers
+local function sumFolder(folder)
+    local total = 0
+    for _, v in ipairs(folder:GetChildren()) do
+        if v:IsA("NumberValue") then total += v.Value end
+    end
+    return total
+end
+
+local function isAICountry(c)
+    local leader = c:FindFirstChild("Leader")
+    return leader and leader.Value == (c.Name .. "AI")
+end
+
+local function getAICountries()
+    local list = {}
+    for _, c in ipairs(workspace.CountryData:GetChildren()) do
+        if isAICountry(c) then table.insert(list, c.Name) end
+    end
+    return list
+end
+
+-- Core trading logic
+local function sellResourceToAI(myCountry, resource, aiName)
+    local resName = resource.Name
+    if not sellableResources[resName] then return end
+
+    local priceInfo = ResourcePrices[resName]
+    if not priceInfo then return end
+    local unitPrice = priceInfo.Sell
+
+    local flowObj = resource:FindFirstChild("Flow")
+    if not flowObj or flowObj.Value <= 0 then return end
+
+    local now = os.time()
+    if lastTradeTime[resName] and now - lastTradeTime[resName] < TRADE_COOLDOWN then
+        return
+    end
+
+    local ai = workspace.CountryData:FindFirstChild(aiName)
+    if not ai then return end
+    local econ = ai:FindFirstChild("Economy")
+    if not econ then return end
+
+    local balance = econ:FindFirstChild("Balance") and econ.Balance.Value or 0
+    if balance < 0 then return end  -- skip debt
+
+    local revenue  = econ:FindFirstChild("Revenue")  and sumFolder(econ.Revenue)  or 0
+    local expenses = econ:FindFirstChild("Expenses") and sumFolder(econ.Expenses) or 0
+    local income   = revenue - expenses
+    if income <= 0 then return end
+
+    local flowCap = bypassFlowLimit and math.huge or (flowObj.Value * TRADE_FLOW_WINDOW)
+    local maxByBal = balance / unitPrice
+    local maxByInc = income / unitPrice
+    local sellAmount = math.min(flowCap, maxByBal, maxByInc)
+    local tradeValue = sellAmount * unitPrice
+
+    if tradeValue < MIN_TRADE_VALUE then return end
+
+    local args = {
+        aiName,
+        "ResourceTrade",
+        { resName, "Sell", sellAmount, 1, "Trade" }
+    }
+    GameManager.ManageAlliance:FireServer(unpack(args))
+    lastTradeTime[resName] = now
+end
+
+local function sellAllToAI(myCountry, aiName)
+    local resFolder = myCountry:FindFirstChild("Resources")
+    if not resFolder then return end
+    for _, res in ipairs(resFolder:GetChildren()) do
+        if res:IsA("NumberValue") and sellableResources[res.Name] then
+            sellResourceToAI(myCountry, res, aiName)
+        end
+    end
+end
+
+-- Heartbeat loop
+local function heartbeatTrade()
+    if not tradingEnabled then return end
+
+    local myCountry
+    for _, c in ipairs(workspace.CountryData:GetChildren()) do
+        if c:FindFirstChild("Leader") and c.Leader.Value == player.Name then
+            myCountry = c
+            break
+        end
+    end
+    if not myCountry then return end
+
+    if aiIndex > #aiList then
+        stopTrading()
+        StarterGui:SetCore("SendNotification", {
+            Title    = "Trade Complete",
+            Text     = "Finished trading with all available AI countries.",
+            Duration = 5
+        })
+        return
+    end
+
+    local targetAI = aiList[aiIndex]
+    sellAllToAI(myCountry, targetAI)
+    aiIndex += 1
+end
+
+-- Control functions
+function startTrading()
+    aiList  = getAICountries()
+    aiIndex = 1
+    lastTradeTime = {}
+    if connection then connection:Disconnect() end
+    connection = RunService.Heartbeat:Connect(heartbeatTrade)
+end
+
+function stopTrading()
+    tradingEnabled = false
+    if connection then
+        connection:Disconnect()
+        connection = nil
+    end
+end
