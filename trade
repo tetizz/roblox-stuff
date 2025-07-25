@@ -1,3 +1,6 @@
+-- Advanced Trading with Debug Prints
+print("Advanced Trading script loaded")
+
 -- Obsidian UI setup
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))()
 local Window  = Library:CreateWindow({
@@ -36,6 +39,7 @@ SettingsGroup:AddDropdown("TradeResources", {
         for _, name in ipairs(selection) do
             selectedResources[name] = true
         end
+        print("Selected resources:", unpack(selection))
     end,
 })
 
@@ -48,6 +52,7 @@ SettingsGroup:AddToggle("EnableAutoTrade", {
     Default = false,
     Callback = function(v)
         tradingEnabled = v
+        print("Enable Auto-Trade set to", v)
         if v then startTrading() else stopTrading() end
     end,
 })
@@ -57,6 +62,7 @@ SettingsGroup:AddToggle("BypassFlowLimit", {
     Default = false,
     Callback = function(v)
         bypassFlowLimit = v
+        print("Bypass Flow Limit set to", v)
     end,
 })
 
@@ -117,48 +123,92 @@ local function getAICountries()
             table.insert(list, c.Name)
         end
     end
+    print("Found AI countries:", unpack(list))
     return list
 end
 
 -- Core trading logic
 local function sellResourceToAI(myCountry, resource, aiName)
     local name = resource.Name
-    if not selectedResources[name] then return end
+    print(("sellResourceToAI called for %s to %s"):format(name, aiName))
+
+    if not selectedResources[name] then
+        print("  - resource not selected, skipping")
+        return
+    end
 
     local price = ResourcePrices[name]
-    if not price then return end
+    if not price then
+        print("  - no price info for", name)
+        return
+    end
 
     local flowObj = resource:FindFirstChild("Flow")
-    if not flowObj or flowObj.Value <= 0 then return end
+    if not flowObj then
+        print("  - no Flow object for", name)
+        return
+    end
+    if flowObj.Value <= 0 then
+        print("  - flow is zero for", name)
+        return
+    end
 
     local now = os.time()
-    if lastTradeTime[name] and now - lastTradeTime[name] < TRADE_COOLDOWN then return end
+    if lastTradeTime[name] and now - lastTradeTime[name] < TRADE_COOLDOWN then
+        print("  - in cooldown for", name)
+        return
+    end
 
     local ai   = workspace.CountryData:FindFirstChild(aiName)
     local econ = ai and ai:FindFirstChild("Economy")
-    if not econ then return end
+    if not econ then
+        print("  - no Economy for AI", aiName)
+        return
+    end
 
     local balance = econ:FindFirstChild("Balance") and econ.Balance.Value or 0
-    if balance < 0 then return end
+    print("  - AI balance:", balance)
+    if balance < 0 then
+        print("  - AI in debt, skipping")
+        return
+    end
 
     local rev = econ:FindFirstChild("Revenue")  and sumFolder(econ.Revenue)  or 0
     local exp = econ:FindFirstChild("Expenses") and sumFolder(econ.Expenses) or 0
     local inc = rev - exp
-    if inc <= 0 then return end
+    print(("  - AI income (rev-exp): %d - %d = %d"):format(rev, exp, inc))
+    if inc <= 0 then
+        print("  - AI net income <= 0, skipping")
+        return
+    end
 
     local cap = bypassFlowLimit and math.huge or (flowObj.Value * TRADE_FLOW_WINDOW)
     local mb  = balance / price.Sell
     local mi  = inc     / price.Sell
     local amt = math.min(cap, mb, mi)
-    if amt * price.Sell < MIN_TRADE_VALUE then return end
+    local tradeValue = amt * price.Sell
 
+    print(("  - flowCap=%.2f, maxByBal=%.2f, maxByInc=%.2f, chosen amt=%.4f, tradeValue=%.2f")
+        :format(cap, mb, mi, amt, tradeValue))
+
+    if tradeValue < MIN_TRADE_VALUE then
+        print("  - tradeValue <", MIN_TRADE_VALUE, "skipping")
+        return
+    end
+
+    print(("  - sending trade: %s x %.4f to %s for $%.2f")
+        :format(name, amt, aiName, tradeValue))
     GameManager.ManageAlliance:FireServer(aiName, "ResourceTrade", { name, "Sell", amt, 1, "Trade" })
     lastTradeTime[name] = now
 end
 
 local function sellAllToAI(country, aiName)
+    print("sellAllToAI for AI", aiName)
     local resFolder = country:FindFirstChild("Resources")
-    if not resFolder then return end
+    if not resFolder then
+        print("  - no Resources folder in myCountry")
+        return
+    end
     for _, v in ipairs(resFolder:GetChildren()) do
         if v:IsA("NumberValue") then
             sellResourceToAI(country, v, aiName)
@@ -177,8 +227,12 @@ local function heartbeat()
             break
         end
     end
-    if not myCountry then return end
+    if not myCountry then
+        print("heartbeat: myCountry not found")
+        return
+    end
 
+    print(("heartbeat: aiIndex=%d, total=%d"):format(aiIndex, #aiList))
     if aiIndex > #aiList then
         stopTrading()
         StarterGui:SetCore("SendNotification", {
@@ -195,6 +249,7 @@ end
 
 -- Control functions
 function startTrading()
+    print("startTrading called")
     aiList  = getAICountries()
     aiIndex = 1
     lastTradeTime = {}
@@ -203,6 +258,7 @@ function startTrading()
 end
 
 function stopTrading()
+    print("stopTrading called")
     tradingEnabled = false
     if connection then
         connection:Disconnect()
