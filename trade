@@ -1,4 +1,4 @@
--- Advanced Trading (Cleaned Debug)
+-- Advanced Trading (Cleaned: only active trades and AI processing are logged)
 
 print("=== Advanced Trading script loaded ===")
 
@@ -36,13 +36,15 @@ SettingsGroup:AddDropdown("TradeResources", {
     Multi    = true,
     Text     = "Select Resources",
     Tooltip  = "Which resources to trade",
-    Callback = function(selMap)
+    Callback = function(sel)
         selectedResources = {}
-        for name,on in pairs(selMap) do
+        for name,on in pairs(sel) do
             if on then selectedResources[name] = true end
         end
         local list = {}
-        for name in pairs(selectedResources) do list[#list+1] = name end
+        for name in pairs(selectedResources) do
+            table.insert(list, name)
+        end
         print("Resources selected:", #list>0 and table.concat(list, ", ") or "none")
     end,
 })
@@ -60,6 +62,7 @@ SettingsGroup:AddToggle("EnableAutoTrade", {
         if v then startTrading() else stopTrading() end
     end,
 })
+
 SettingsGroup:AddToggle("BypassFlowLimit", {
     Text    = "Bypass Flow Limit",
     Default = false,
@@ -108,7 +111,7 @@ local MIN_POST_NET      = 1000
 local lastTradeTime = {}
 local aiList, aiIndex, connection
 
--- Helper: sum all NumberValue/IntValue descendants
+-- Helper to sum all NumberValue/IntValue under a folder
 local function sumValues(folder)
     local total = 0
     for _, obj in ipairs(folder:GetDescendants()) do
@@ -119,7 +122,7 @@ local function sumValues(folder)
     return total
 end
 
--- Identify AI nations
+-- Identify AI-controlled nations
 local function isAICountry(c)
     local leader = c:FindFirstChild("Leader")
     return leader and leader.Value == (c.Name .. "AI")
@@ -135,12 +138,11 @@ local function getAICountries()
     return list
 end
 
--- Core trade function (only prints when a trade actually goes through)
+-- Core trade function (only logs actual trades)
 local function sellResourceToAI(myCountry, resource, aiName)
     local name = resource.Name
     local price = ResourcePrices[name]
     local flowVal = resource.Flow and resource.Flow.Value or 0
-
     if not price or flowVal <= 0 then return end
 
     local now = os.time()
@@ -168,30 +170,29 @@ local function sellResourceToAI(myCountry, resource, aiName)
     if postNet < MIN_POST_NET then return end
 
     -- Perform and log the trade
-    print(("Trading %.4f of %s to %s for $%.2f"):format(amt, name, aiName, value))
+    print(("Trading %.4f units of %s to %s for $%.2f"):format(amt, name, aiName, value))
     GameManager.ManageAlliance:FireServer(aiName, "ResourceTrade", {name, "Sell", amt, 1, "Trade"})
     lastTradeTime[name] = now
 
+    -- Wait before next trade
     task.wait(3)
 end
 
--- Sell only selected resources to one AI
+-- Sell selected resources to one AI
 local function sellAllToAI(myCountry, aiName)
-    -- No logs here, trades are logged individually above
-    local resFolder = myCountry:FindFirstChild("Resources")
-    if not resFolder then return end
     for name in pairs(selectedResources) do
-        local res = resFolder:FindFirstChild(name)
+        local res = myCountry.Resources:FindFirstChild(name)
         if res and res:IsA("NumberValue") then
             sellResourceToAI(myCountry, res, aiName)
         end
     end
 end
 
--- Heartbeat loop
+-- Heartbeat processing
 local function heartbeat()
     if not tradingEnabled then return end
 
+    -- Find your country
     local myCountry
     for _, c in ipairs(workspace.CountryData:GetChildren()) do
         if c.Leader and c.Leader.Value == player.Name then
@@ -201,6 +202,7 @@ local function heartbeat()
     end
     if not myCountry then return end
 
+    -- If done, stop
     if aiIndex > #aiList then
         stopTrading()
         StarterGui:SetCore("SendNotification", {
@@ -217,7 +219,7 @@ local function heartbeat()
     aiIndex = aiIndex + 1
 end
 
--- Control functions
+-- Start/stop functions
 function startTrading()
     aiList  = getAICountries()
     aiIndex = 1
