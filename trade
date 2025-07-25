@@ -80,24 +80,24 @@ local player      = Players.LocalPlayer
 
 -- Price data
 local ResourcePrices = {
-    Iron                = {Sell = 30400, Buy = 38000},
-    Aluminum            = {Sell = 30400, Buy = 38000},
-    Oil                 = {Sell = 32000, Buy = 40000},
-    Phosphate           = {Sell = 33200, Buy = 41500},
-    Copper              = {Sell = 33600, Buy = 42000},
-    Chromium            = {Sell = 38000, Buy = 47500},
-    Gold                = {Sell = 43200, Buy = 54000},
-    Diamond             = {Sell = 69600, Buy = 87000},
-    Tungsten            = {Sell = 76800, Buy = 96000},
-    Titanium            = {Sell = 81600, Buy = 102000},
-    Uranium             = {Sell = 420000,Buy = 525000},
-    Steel               = {Sell = 60000, Buy = 75000},
-    ["Consumer Goods"]  = {Sell = 65920, Buy = 82400},
-    Fertilizer          = {Sell = 67200, Buy = 84400},
-    ["Motor Parts"]     = {Sell = 73600, Buy = 92000},
-    Electronics         = {Sell = 81600, Buy = 102000},
-    ["Aircraft Parts"]  = {Sell = 83200, Buy = 104000},
-    ["Enriched Uranium"]= {Sell = 96000000, Buy = 120000000},
+    Iron                = {Sell = 30400,     Buy = 38000},
+    Aluminum            = {Sell = 30400,     Buy = 38000},
+    Oil                 = {Sell = 32000,     Buy = 40000},
+    Phosphate           = {Sell = 33200,     Buy = 41500},
+    Copper              = {Sell = 33600,     Buy = 42000},
+    Chromium            = {Sell = 38000,     Buy = 47500},
+    Gold                = {Sell = 43200,     Buy = 54000},
+    Diamond             = {Sell = 69600,     Buy = 87000},
+    Tungsten            = {Sell = 76800,     Buy = 96000},
+    Titanium            = {Sell = 81600,     Buy = 102000},
+    Uranium             = {Sell = 420000,    Buy = 525000},
+    Steel               = {Sell = 60000,     Buy = 75000},
+    ["Consumer Goods"]  = {Sell = 65920,     Buy = 82400},
+    Fertilizer          = {Sell = 67200,     Buy = 84400},
+    ["Motor Parts"]     = {Sell = 73600,     Buy = 92000},
+    Electronics         = {Sell = 81600,     Buy = 102000},
+    ["Aircraft Parts"]  = {Sell = 83200,     Buy = 104000},
+    ["Enriched Uranium"]= {Sell = 96000000,  Buy = 120000000},
 }
 print("Price data loaded")
 
@@ -112,9 +112,7 @@ local aiList, aiIndex, connection
 local function sumFolder(folder)
     local total = 0
     for _, v in ipairs(folder:GetChildren()) do
-        if v:IsA("NumberValue") then
-            total = total + v.Value
-        end
+        if v:IsA("NumberValue") then total = total + v.Value end
     end
     return total
 end
@@ -127,9 +125,7 @@ end
 local function getAICountries()
     local t = {}
     for _, c in ipairs(workspace.CountryData:GetChildren()) do
-        if isAICountry(c) then
-            table.insert(t, c.Name)
-        end
+        if isAICountry(c) then table.insert(t, c.Name) end
     end
     print("AI countries:", unpack(t))
     return t
@@ -138,7 +134,7 @@ end
 -- Core trading logic
 local function sellResourceToAI(myCountry, resource, aiName)
     local name = resource.Name
-    print(string.format("Trying to sell %s to %s", name, aiName))
+    print(("Trying to sell %s to %s"):format(name, aiName))
 
     if not selectedResources[name] then
         print("Not selected, skipping")
@@ -180,7 +176,7 @@ local function sellResourceToAI(myCountry, resource, aiName)
     local revenue  = econ:FindFirstChild("Revenue")  and sumFolder(econ.Revenue)  or 0
     local expenses = econ:FindFirstChild("Expenses") and sumFolder(econ.Expenses) or 0
     local income   = revenue - expenses
-    print(string.format("Income: %d - %d = %d", revenue, expenses, income))
+    print(("Income: %d - %d = %d"):format(revenue, expenses, income))
     if income <= 0 then
         print("No net income, skipping")
         return
@@ -191,33 +187,25 @@ local function sellResourceToAI(myCountry, resource, aiName)
     local maxByIncome  = income  / price.Sell
     local sellAmount   = math.min(flowCap, maxByBalance, maxByIncome)
     local tradeValue   = sellAmount * price.Sell
-    print(string.format("cap=%.2f, mb=%.2f, mi=%.2f, amt=%.4f, value=%.2f",
-        flowCap, maxByBalance, maxByIncome, sellAmount, tradeValue))
+    print(("cap=%.2f mb=%.2f mi=%.2f amt=%.4f value=%.2f")
+        :format(flowCap, maxByBalance, maxByIncome, sellAmount, tradeValue))
     if tradeValue < MIN_TRADE_VALUE then
         print("Trade value < $1, skipping")
         return
     end
 
-    print(string.format("Sending trade: %s x %.4f to %s for $%.2f",
-        name, sellAmount, aiName, tradeValue))
-    GameManager.ManageAlliance:FireServer(
-        aiName,
-        "ResourceTrade",
-        {name, "Sell", sellAmount, 1, "Trade"}
-    )
+    print(("Sending trade: %s x %.4f for $%.2f"):format(name, sellAmount, tradeValue))
+    GameManager.ManageAlliance:FireServer(aiName, "ResourceTrade", {name, "Sell", sellAmount, 1, "Trade"})
     lastTradeTime[name] = now
 end
 
-local function sellAllToAI(country, aiName)
+-- Only iterate over selected resources
+local function sellAllToAI(myCountry, aiName)
     print("sellAllToAI ->", aiName)
-    local resFolder = country:FindFirstChild("Resources")
-    if not resFolder then
-        print("No Resources folder")
-        return
-    end
-    for _, res in ipairs(resFolder:GetChildren()) do
-        if res:IsA("NumberValue") then
-            sellResourceToAI(country, res, aiName)
+    for resName in pairs(selectedResources) do
+        local resource = myCountry:FindFirstChild("Resources") and myCountry.Resources:FindFirstChild(resName)
+        if resource and resource:IsA("NumberValue") then
+            sellResourceToAI(myCountry, resource, aiName)
         end
     end
 end
@@ -229,8 +217,7 @@ local function heartbeat()
 
     local myCountry
     for _, c in ipairs(workspace.CountryData:GetChildren()) do
-        if c:FindFirstChild("Leader")
-           and c.Leader.Value == player.Name then
+        if c:FindFirstChild("Leader") and c.Leader.Value == player.Name then
             myCountry = c
             break
         end
