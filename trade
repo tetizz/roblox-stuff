@@ -154,7 +154,10 @@ local function heartbeat()
     local aiName = aiList[aiIndex]
     print("► Processing AI:", aiName)
     sellAllToAI(myCountry, aiName)
+
+    -- Fix: proper increment
     aiIndex = aiIndex + 1
+
     task.wait(TRADE_DELAY)
 end
 
@@ -216,4 +219,3 @@ SettingsGroup:AddToggle("EnableAutoTrade", {
 })
 
 print("Advanced Trading ready; toggle on to begin.")
-
