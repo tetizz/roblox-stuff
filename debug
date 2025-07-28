@@ -1,18 +1,20 @@
+-- Preferred code formatting: single space around '=' in all statements.
+
 -- 0) Load Obsidian UI
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
-local Window  = Library:CreateWindow({
-    Title         = "Debug",
-    Footer        = "v1.0.3",
+local Window = Library:CreateWindow({
+    Title = "Debug",
+    Footer = "v1.0.3",
     ToggleKeybind = Enum.KeyCode.RightControl,
-    Center        = true,
-    AutoShow      = true,
+    Center = true,
+    AutoShow = true,
 })
 
 -- 1) Services & References
-local RunService     = game:GetService("RunService")
-local Players        = game:GetService("Players")
-local workspace      = game:GetService("Workspace")
-local JustifyWar     = workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local workspace = game:GetService("Workspace")
+local JustifyWar = workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar")
 local ManageAlliance = workspace:WaitForChild("GameManager"):WaitForChild("ManageAlliance")
 
 -- 2) Utility: find your country by Leader = your player name
@@ -40,13 +42,15 @@ local function hasConquestCB(ownCountry, target)
 end
 
 -- 4) State & connections
-local justifyConn, declareConn, peaceConn
-local justified    = {}
-local declared     = {}
+local justifyConn = nil
+local declareConn = nil
+local peaceConn = nil
+local justified = {}
+local declared = {}
 local processedWars = {}
 local lastPeaceTime = 0
 
--- 5a) Auto-Justify War
+-- 5a) Auto Justify War
 local function startJustify()
     justified = {}
     justifyConn = RunService.Heartbeat:Connect(function()
@@ -54,10 +58,7 @@ local function startJustify()
         if not myCountry then return end
         for _, c in ipairs(workspace.CountryData:GetChildren()) do
             local name = c.Name
-            if name ~= myCountry
-            and not justified[name]
-            and not hasConquestCB(myCountry, name)
-            then
+            if name ~= myCountry and not justified[name] and not hasConquestCB(myCountry, name) then
                 JustifyWar:FireServer(name, "Conquest")
                 print("Justified war on", name)
                 justified[name] = true
@@ -74,7 +75,7 @@ local function stopJustify()
     end
 end
 
--- 5b) Auto-Declare War (only for countries you've justified on)
+-- 5b) Auto Declare War (only for countries you've justified on)
 local function startDeclare()
     declared = {}
     declareConn = RunService.Heartbeat:Connect(function()
@@ -82,10 +83,7 @@ local function startDeclare()
         if not myCountry then return end
         for _, c in ipairs(workspace.CountryData:GetChildren()) do
             local name = c.Name
-            if name ~= myCountry
-            and not declared[name]
-            and hasConquestCB(myCountry, name)
-            then
+            if name ~= myCountry and not declared[name] and hasConquestCB(myCountry, name) then
                 ManageAlliance:FireServer(name, "WarDeclare", "Conquest")
                 print("Declared war on", name)
                 declared[name] = true
@@ -102,7 +100,7 @@ local function stopDeclare()
     end
 end
 
--- 5c) Auto-PeaceOut Wars
+-- 5c) Auto Peace Wars (no reparations)
 local function startPeace()
     processedWars = {}
     lastPeaceTime = 0
@@ -110,14 +108,11 @@ local function startPeace()
         local now = os.clock()
         if now - lastPeaceTime < 1 then return end
         lastPeaceTime = now
-
         local myCountry = getCountryByLeader()
         if not myCountry then return end
-
         local warsFolder = workspace:FindFirstChild("Wars")
         if not warsFolder then return end
 
-        -- cleanup ended wars
         for warName in pairs(processedWars) do
             if not warsFolder:FindFirstChild(warName) then
                 processedWars[warName] = nil
@@ -140,10 +135,9 @@ local function startPeace()
                                     warName,
                                     "Demand",
                                     {
-                                        AnnexSome   = {},
-                                        Money       = { Percentage = 75 },
-                                        Resource    = { Percentage = 75 },
-                                        Reparations = { Percentage = 25, Length = 5 },
+                                        AnnexSome = {},
+                                        Money = { Percentage = 75 },
+                                        Resource = { Percentage = 75 },
                                     }
                                 }
                             }
@@ -166,48 +160,48 @@ local function stopPeace()
     end
 end
 
--- 6) UI: toggles for each script, with notifications
-local WarTab   = Window:AddTab("Auto-Wars", "shield", "Automated war scripts")
+-- 6) UI: toggles for each script
+local WarTab = Window:AddTab("Auto Wars", "shield", "Automated war scripts")
 local WarGroup = WarTab:AddLeftGroupbox("War Script Toggles", "settings")
 
 WarGroup:AddToggle("AutoJustify", {
-    Text    = "Auto-Justify War",
+    Text = "Auto Justify War",
     Default = false,
     Callback = function(on)
         if on then
             startJustify()
-            Library:Notify({Title = "Auto-Justify", Description = "Enabled", Time = 3})
+            Library:Notify({ Title = "Auto Justify", Description = "Enabled", Time = 3 })
         else
             stopJustify()
-            Library:Notify({Title = "Auto-Justify", Description = "Disabled", Time = 3})
+            Library:Notify({ Title = "Auto Justify", Description = "Disabled", Time = 3 })
         end
     end,
 })
 
 WarGroup:AddToggle("AutoDeclare", {
-    Text    = "Auto-Declare War",
+    Text = "Auto Declare War",
     Default = false,
     Callback = function(on)
         if on then
             startDeclare()
-            Library:Notify({Title = "Auto-Declare", Description = "Enabled", Time = 3})
+            Library:Notify({ Title = "Auto Declare", Description = "Enabled", Time = 3 })
         else
             stopDeclare()
-            Library:Notify({Title = "Auto-Declare", Description = "Disabled", Time = 3})
+            Library:Notify({ Title = "Auto Declare", Description = "Disabled", Time = 3 })
         end
     end,
 })
 
-WarGroup:AddToggle("AutoPeaceOut", {
-    Text    = "Auto-PeaceOut Wars",
+WarGroup:AddToggle("AutoPeace", {
+    Text = "Auto Peace Wars",
     Default = false,
     Callback = function(on)
         if on then
             startPeace()
-            Library:Notify({Title = "Auto-PeaceOut", Description = "Enabled", Time = 3})
+            Library:Notify({ Title = "Auto Peace", Description = "Enabled", Time = 3 })
         else
             stopPeace()
-            Library:Notify({Title = "Auto-PeaceOut", Description = "Disabled", Time = 3})
+            Library:Notify({ Title = "Auto Peace", Description = "Disabled", Time = 3 })
         end
     end,
 })
