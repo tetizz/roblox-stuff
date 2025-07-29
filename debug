@@ -281,14 +281,14 @@ local function stopRebelWatchOwn()
     notifiedOwnFunders = {}
 end
 
--- 6) UI: toggles for each script inside the "War Automation" tab
+-- 6) UI: toggles for each script inside the "Scripts" tab, icons swapped as requested
 
-local WarTab = Window:AddTab("War Automation", "shield", "Automated war features")
+local ScriptsTab = Window:AddTab("Scripts", "code", "Debugging") -- Tab icon "code"
 
--- Auto Wars groupbox for war automation toggles
-local AutoWarsGroup = WarTab:AddLeftGroupbox("Auto Wars", "code") -- Icon "code" for scripts
+-- Scripts groupbox with shield icon (was code)
+local ScriptsGroup = ScriptsTab:AddLeftGroupbox("Scripts", "shield")
 
-AutoWarsGroup:AddToggle("AutoJustify", {
+ScriptsGroup:AddToggle("AutoJustify", {
     Text = "Auto Justify War",
     Default = false,
     Callback = function(on)
@@ -302,7 +302,7 @@ AutoWarsGroup:AddToggle("AutoJustify", {
     end,
 })
 
-AutoWarsGroup:AddToggle("AutoDeclare", {
+ScriptsGroup:AddToggle("AutoDeclare", {
     Text = "Auto Declare War",
     Default = false,
     Callback = function(on)
@@ -316,7 +316,7 @@ AutoWarsGroup:AddToggle("AutoDeclare", {
     end,
 })
 
-AutoWarsGroup:AddToggle("AutoPeace", {
+ScriptsGroup:AddToggle("AutoPeace", {
     Text = "Auto Peace Wars",
     Default = false,
     Callback = function(on)
@@ -330,8 +330,8 @@ AutoWarsGroup:AddToggle("AutoPeace", {
     end,
 })
 
--- Rebel Watch groupbox separate for rebel watch toggles
-local RebelWatchGroup = WarTab:AddLeftGroupbox("Rebel Watch", "flag")
+-- Rebel Watch groupbox with code icon (was shield)
+local RebelWatchGroup = ScriptsTab:AddLeftGroupbox("Rebel Watch", "code")
 
 RebelWatchGroup:AddToggle("RebelWatch", {
     Text = "Rebel Watch (Global)",
@@ -361,14 +361,13 @@ RebelWatchGroup:AddToggle("RebelWatchOwn", {
     end,
 })
 
-print("War automation scripts v1.0.3 ready; toggle them in the UI to enable.")
+print("Scripts debugging v1.0.3 ready; toggle them in the UI to enable.")
 
 --[[
 Notes:
-- All loops throttle updates to one second.
-- Notifications are consistent with Obsidian UI usage.
-- Rebel Watch toggles reside in their own groupbox for clarity.
-- Tab renamed to "War Automation" with description "Automated war features".
+- All throttled loops run once per second or less.
+- Notifications consistent with Obsidian UI approach.
+- Icons swapped: Tab uses "code"; Scripts group uses "shield"; Rebel Watch group uses "code".
+- Tab renamed "Scripts" with description "Debugging".
 ]]
-
 
