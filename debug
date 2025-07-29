@@ -281,11 +281,11 @@ local function stopRebelWatchOwn()
     notifiedOwnFunders = {}
 end
 
--- 6) UI: toggles for each script inside the "Scripts" tab, icons swapped as requested
+-- 6) UI: toggles for each script inside the "Scripts" tab, icons swapped with Rebel Watch icon back to "flag"
 
-local ScriptsTab = Window:AddTab("Scripts", "code", "Debugging") -- Tab icon "code"
+local ScriptsTab = Window:AddTab("Scripts", "code", "Debugging") -- tab icon "code"
 
--- Scripts groupbox with shield icon (was code)
+-- Scripts groupbox uses "shield" icon
 local ScriptsGroup = ScriptsTab:AddLeftGroupbox("Scripts", "shield")
 
 ScriptsGroup:AddToggle("AutoJustify", {
@@ -330,8 +330,8 @@ ScriptsGroup:AddToggle("AutoPeace", {
     end,
 })
 
--- Rebel Watch groupbox with code icon (was shield)
-local RebelWatchGroup = ScriptsTab:AddLeftGroupbox("Rebel Watch", "code")
+-- Rebel Watch groupbox uses "flag" icon again as requested
+local RebelWatchGroup = ScriptsTab:AddLeftGroupbox("Rebel Watch", "flag")
 
 RebelWatchGroup:AddToggle("RebelWatch", {
     Text = "Rebel Watch (Global)",
@@ -367,7 +367,7 @@ print("Scripts debugging v1.0.3 ready; toggle them in the UI to enable.")
 Notes:
 - All throttled loops run once per second or less.
 - Notifications consistent with Obsidian UI approach.
-- Icons swapped: Tab uses "code"; Scripts group uses "shield"; Rebel Watch group uses "code".
-- Tab renamed "Scripts" with description "Debugging".
+- Rebel Watch groupbox icon reverted to "flag".
+- Other icons and tab description as requested.
 ]]
 
