@@ -367,5 +367,5 @@ Notes:
 - All main loops are throttled to once per second.
 - Notifications use the Obsidian Library:Notify method.
 - Rebel watch notifications avoid duplicates until funding changes.
-- Rebel watch toggles are organized in a separate group for clarity.
+- Rebel watch toggles are organized in a separate groupbox for UI clarity.
 ]]
