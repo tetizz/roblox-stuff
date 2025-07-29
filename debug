@@ -1,4 +1,4 @@
--- Preferred code formatting: single space around '=' in all statements.
+-- Preferred code formatting: single space around = in all statements.
 
 -- 0) Load Obsidian UI
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
@@ -50,19 +50,27 @@ local declared = {}
 local processedWars = {}
 local lastPeaceTime = 0
 
--- 5a) Auto Justify War
+-- 5a) Auto Justify War (throttled, cache children per cycle)
 local function startJustify()
     justified = {}
+    local lastCheck = 0
     justifyConn = RunService.Heartbeat:Connect(function()
+        -- Throttle loop to once per second
+        local now = os.clock()
+        if now - lastCheck < 1 then return end
+        lastCheck = now
+
         local myCountry = getCountryByLeader()
         if not myCountry then return end
-        for _, c in ipairs(workspace.CountryData:GetChildren()) do
+
+        local countries = workspace.CountryData:GetChildren()
+        for _, c in ipairs(countries) do
             local name = c.Name
             if name ~= myCountry and not justified[name] and not hasConquestCB(myCountry, name) then
                 JustifyWar:FireServer(name, "Conquest")
                 print("Justified war on", name)
                 justified[name] = true
-                task.wait(1)
+                -- No need to wait inside the main loop due to rate limit on entire connection
             end
         end
     end)
@@ -75,19 +83,27 @@ local function stopJustify()
     end
 end
 
--- 5b) Auto Declare War (only for countries you've justified on)
+-- 5b) Auto Declare War (throttled, cache children per cycle)
 local function startDeclare()
     declared = {}
+    local lastCheck = 0
     declareConn = RunService.Heartbeat:Connect(function()
+        -- Throttle loop to once per second
+        local now = os.clock()
+        if now - lastCheck < 1 then return end
+        lastCheck = now
+
         local myCountry = getCountryByLeader()
         if not myCountry then return end
-        for _, c in ipairs(workspace.CountryData:GetChildren()) do
+
+        local countries = workspace.CountryData:GetChildren()
+        for _, c in ipairs(countries) do
             local name = c.Name
             if name ~= myCountry and not declared[name] and hasConquestCB(myCountry, name) then
                 ManageAlliance:FireServer(name, "WarDeclare", "Conquest")
                 print("Declared war on", name)
                 declared[name] = true
-                task.wait(1)
+                -- No need to wait inside the main loop due to rate limit on entire connection
             end
         end
     end)
@@ -100,14 +116,16 @@ local function stopDeclare()
     end
 end
 
--- 5c) Auto Peace Wars (no reparations)
+-- 5c) Auto Peace Wars (throttled, cleanup only as-needed)
 local function startPeace()
     processedWars = {}
     lastPeaceTime = 0
     peaceConn = RunService.Heartbeat:Connect(function()
+        -- Throttle loop to once per second
         local now = os.clock()
         if now - lastPeaceTime < 1 then return end
         lastPeaceTime = now
+
         local myCountry = getCountryByLeader()
         if not myCountry then return end
         local warsFolder = workspace:FindFirstChild("Wars")
@@ -143,7 +161,6 @@ local function startPeace()
                             }
                             ManageAlliance:FireServer(unpack(args))
                             print(("Sent PeaceOut to %s for '%s'"):format(defName, warName))
-                            task.wait(0.1)
                         end
                     end
                     processedWars[warName] = true
@@ -206,4 +223,148 @@ WarGroup:AddToggle("AutoPeace", {
     end,
 })
 
-print("War automations v1.0.3 ready; toggle them in the UI to enable.")
+-- 7) Rebel Watches
+
+local rebelWatchConn = nil
+local rebelWatchOwnConn = nil
+local notifiedFunders = {}
+local notifiedOwnFunders = {}
+
+-- Global rebel funding watch for all countries
+local function startRebelWatch()
+    notifiedFunders = {}
+
+    rebelWatchConn = RunService.Heartbeat:Connect(function()
+        for _, countryData in ipairs(workspace.CountryData:GetChildren()) do
+            local countryName = countryData.Name
+            local rebelFolder = countryData:FindFirstChild("Rebel")
+
+            if rebelFolder then
+                notifiedFunders[countryName] = notifiedFunders[countryName] or {}
+                local currentFunders = {}
+
+                for _, funder in ipairs(rebelFolder:GetChildren()) do
+                    local funderName = funder.Name
+                    currentFunders[funderName] = true
+
+                    if not notifiedFunders[countryName][funderName] then
+                        Library:Notify({
+                            Title = "Rebel Funding Detected",
+                            Description = funderName .. " is funding rebels in " .. countryName,
+                            Time = 5,
+                        })
+                        print(funderName .. " is funding rebels in " .. countryName)
+
+                        notifiedFunders[countryName][funderName] = true
+                    end
+                end
+
+                -- Clean up old funder notifications
+                for previousFunder, _ in pairs(notifiedFunders[countryName]) do
+                    if not currentFunders[previousFunder] then
+                        notifiedFunders[countryName][previousFunder] = nil
+                    end
+                end
+            else
+                notifiedFunders[countryName] = {}
+            end
+        end
+    end)
+end
+
+local function stopRebelWatch()
+    if rebelWatchConn then
+        rebelWatchConn:Disconnect()
+        rebelWatchConn = nil
+    end
+    notifiedFunders = {}
+end
+
+-- Own country rebel funding watch
+local function startRebelWatchOwn()
+    notifiedOwnFunders = {}
+
+    rebelWatchOwnConn = RunService.Heartbeat:Connect(function()
+        local myCountry = getCountryByLeader()
+        if not myCountry then return end
+
+        local countryData = workspace.CountryData:FindFirstChild(myCountry)
+        if not countryData then return end
+
+        local rebelFolder = countryData:FindFirstChild("Rebel")
+        if rebelFolder then
+            notifiedOwnFunders = notifiedOwnFunders or {}
+            local currentFunders = {}
+
+            for _, funder in ipairs(rebelFolder:GetChildren()) do
+                local funderName = funder.Name
+                currentFunders[funderName] = true
+
+                if not notifiedOwnFunders[funderName] then
+                    Library:Notify({
+                        Title = "Rebels Funded In Your Country",
+                        Description = funderName .. " is funding rebels in " .. myCountry,
+                        Time = 5,
+                    })
+                    print(funderName .. " is funding rebels in your country:", myCountry)
+                    notifiedOwnFunders[funderName] = true
+                end
+            end
+
+            -- Clean up old funder notifications
+            for previousFunder, _ in pairs(notifiedOwnFunders) do
+                if not currentFunders[previousFunder] then
+                    notifiedOwnFunders[previousFunder] = nil
+                end
+            end
+        else
+            notifiedOwnFunders = {}
+        end
+    end)
+end
+
+local function stopRebelWatchOwn()
+    if rebelWatchOwnConn then
+        rebelWatchOwnConn:Disconnect()
+        rebelWatchOwnConn = nil
+    end
+    notifiedOwnFunders = {}
+end
+
+-- Add toggles to UI group
+WarGroup:AddToggle("RebelWatch", {
+    Text = "Rebel Watch (Global)",
+    Default = false,
+    Callback = function(on)
+        if on then
+            startRebelWatch()
+            Library:Notify({ Title = "Rebel Watch (Global)", Description = "Enabled", Time = 3 })
+        else
+            stopRebelWatch()
+            Library:Notify({ Title = "Rebel Watch (Global)", Description = "Disabled", Time = 3 })
+        end
+    end,
+})
+
+WarGroup:AddToggle("RebelWatchOwn", {
+    Text = "Rebel Watch (Own Country)",
+    Default = false,
+    Callback = function(on)
+        if on then
+            startRebelWatchOwn()
+            Library:Notify({ Title = "Rebel Watch (Own Country)", Description = "Enabled", Time = 3 })
+        else
+            stopRebelWatchOwn()
+            Library:Notify({ Title = "Rebel Watch (Own Country)", Description = "Disabled", Time = 3 })
+        end
+    end,
+})
+
+
+print("Debug gui v1.0.3 ready; toggle them in the UI to enable.")
+
+--[[
+Further event-driven optimizations (e.g., connection to ChildRemoved on warsFolder)
+can be added if the target game allows event listeners, reducing polling even more.
+]]
+
