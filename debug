@@ -45,9 +45,15 @@ end
 local justifyConn = nil
 local declareConn = nil
 local peaceConn = nil
+local rebelWatchConn = nil
+local rebelWatchOwnConn = nil
+
 local justified = {}
 local declared = {}
 local processedWars = {}
+local notifiedFunders = {}
+local notifiedOwnFunders = {}
+
 local lastPeaceTime = 0
 
 -- 5a) Auto Justify War (throttled, cache children per cycle)
@@ -55,7 +61,6 @@ local function startJustify()
     justified = {}
     local lastCheck = 0
     justifyConn = RunService.Heartbeat:Connect(function()
-        -- Throttle loop to once per second
         local now = os.clock()
         if now - lastCheck < 1 then return end
         lastCheck = now
@@ -70,7 +75,6 @@ local function startJustify()
                 JustifyWar:FireServer(name, "Conquest")
                 print("Justified war on", name)
                 justified[name] = true
-                -- No need to wait inside the main loop due to rate limit on entire connection
             end
         end
     end)
@@ -88,7 +92,6 @@ local function startDeclare()
     declared = {}
     local lastCheck = 0
     declareConn = RunService.Heartbeat:Connect(function()
-        -- Throttle loop to once per second
         local now = os.clock()
         if now - lastCheck < 1 then return end
         lastCheck = now
@@ -103,7 +106,6 @@ local function startDeclare()
                 ManageAlliance:FireServer(name, "WarDeclare", "Conquest")
                 print("Declared war on", name)
                 declared[name] = true
-                -- No need to wait inside the main loop due to rate limit on entire connection
             end
         end
     end)
@@ -121,7 +123,6 @@ local function startPeace()
     processedWars = {}
     lastPeaceTime = 0
     peaceConn = RunService.Heartbeat:Connect(function()
-        -- Throttle loop to once per second
         local now = os.clock()
         if now - lastPeaceTime < 1 then return end
         lastPeaceTime = now
@@ -177,58 +178,7 @@ local function stopPeace()
     end
 end
 
--- 6) UI: toggles for each script
-local WarTab = Window:AddTab("Auto Wars", "shield", "Automated war scripts")
-local WarGroup = WarTab:AddLeftGroupbox("War Script Toggles", "settings")
-
-WarGroup:AddToggle("AutoJustify", {
-    Text = "Auto Justify War",
-    Default = false,
-    Callback = function(on)
-        if on then
-            startJustify()
-            Library:Notify({ Title = "Auto Justify", Description = "Enabled", Time = 3 })
-        else
-            stopJustify()
-            Library:Notify({ Title = "Auto Justify", Description = "Disabled", Time = 3 })
-        end
-    end,
-})
-
-WarGroup:AddToggle("AutoDeclare", {
-    Text = "Auto Declare War",
-    Default = false,
-    Callback = function(on)
-        if on then
-            startDeclare()
-            Library:Notify({ Title = "Auto Declare", Description = "Enabled", Time = 3 })
-        else
-            stopDeclare()
-            Library:Notify({ Title = "Auto Declare", Description = "Disabled", Time = 3 })
-        end
-    end,
-})
-
-WarGroup:AddToggle("AutoPeace", {
-    Text = "Auto Peace Wars",
-    Default = false,
-    Callback = function(on)
-        if on then
-            startPeace()
-            Library:Notify({ Title = "Auto Peace", Description = "Enabled", Time = 3 })
-        else
-            stopPeace()
-            Library:Notify({ Title = "Auto Peace", Description = "Disabled", Time = 3 })
-        end
-    end,
-})
-
 -- 7) Rebel Watches
-
-local rebelWatchConn = nil
-local rebelWatchOwnConn = nil
-local notifiedFunders = {}
-local notifiedOwnFunders = {}
 
 -- Global rebel funding watch for all countries
 local function startRebelWatch()
@@ -306,7 +256,7 @@ local function startRebelWatchOwn()
                         Description = funderName .. " is funding rebels in " .. myCountry,
                         Time = 5,
                     })
-                    print(funderName .. " is funding rebels in your country:", myCountry)
+                    print(funderName .. " is funding rebels in your country: " .. myCountry)
                     notifiedOwnFunders[funderName] = true
                 end
             end
@@ -331,8 +281,58 @@ local function stopRebelWatchOwn()
     notifiedOwnFunders = {}
 end
 
--- Add toggles to UI group
-WarGroup:AddToggle("RebelWatch", {
+-- 6) UI: toggles for each script
+
+local WarTab = Window:AddTab("Auto Wars", "shield", "Automated war scripts")
+
+local WarGroup = WarTab:AddLeftGroupbox("War Script Toggles", "settings")
+
+WarGroup:AddToggle("AutoJustify", {
+    Text = "Auto Justify War",
+    Default = false,
+    Callback = function(on)
+        if on then
+            startJustify()
+            Library:Notify({ Title = "Auto Justify", Description = "Enabled", Time = 3 })
+        else
+            stopJustify()
+            Library:Notify({ Title = "Auto Justify", Description = "Disabled", Time = 3 })
+        end
+    end,
+})
+
+WarGroup:AddToggle("AutoDeclare", {
+    Text = "Auto Declare War",
+    Default = false,
+    Callback = function(on)
+        if on then
+            startDeclare()
+            Library:Notify({ Title = "Auto Declare", Description = "Enabled", Time = 3 })
+        else
+            stopDeclare()
+            Library:Notify({ Title = "Auto Declare", Description = "Disabled", Time = 3 })
+        end
+    end,
+})
+
+WarGroup:AddToggle("AutoPeace", {
+    Text = "Auto Peace Wars",
+    Default = false,
+    Callback = function(on)
+        if on then
+            startPeace()
+            Library:Notify({ Title = "Auto Peace", Description = "Enabled", Time = 3 })
+        else
+            stopPeace()
+            Library:Notify({ Title = "Auto Peace", Description = "Disabled", Time = 3 })
+        end
+    end,
+})
+
+-- New separate groupbox for Rebel Watch toggles
+local RebelWatchGroup = WarTab:AddLeftGroupbox("Rebel Watch", "flag")
+
+RebelWatchGroup:AddToggle("RebelWatch", {
     Text = "Rebel Watch (Global)",
     Default = false,
     Callback = function(on)
@@ -346,7 +346,7 @@ WarGroup:AddToggle("RebelWatch", {
     end,
 })
 
-WarGroup:AddToggle("RebelWatchOwn", {
+RebelWatchGroup:AddToggle("RebelWatchOwn", {
     Text = "Rebel Watch (Own Country)",
     Default = false,
     Callback = function(on)
@@ -360,11 +360,12 @@ WarGroup:AddToggle("RebelWatchOwn", {
     end,
 })
 
-
-print("Debug gui v1.0.3 ready; toggle them in the UI to enable.")
+print("War automations v1.0.3 ready; toggle them in the UI to enable.")
 
 --[[
-Further event-driven optimizations (e.g., connection to ChildRemoved on warsFolder)
-can be added if the target game allows event listeners, reducing polling even more.
+Notes:
+- All main loops are throttled to once per second.
+- Notifications use the Obsidian Library:Notify method.
+- Rebel watch notifications avoid duplicates until funding changes.
+- Rebel watch toggles are organized in a separate group for clarity.
 ]]
-
