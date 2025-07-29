@@ -281,13 +281,14 @@ local function stopRebelWatchOwn()
     notifiedOwnFunders = {}
 end
 
--- 6) UI: toggles for each script
+-- 6) UI: toggles for each script inside the "Auto Wars" tab with refined groupboxes
 
-local WarTab = Window:AddTab("Auto Wars", "shield", "Automated war scripts")
+local WarTab = Window:AddTab("Auto Wars", "shield", "Debugging")
 
-local WarGroup = WarTab:AddLeftGroupbox("War Script Toggles", "settings")
+-- Scripts groupbox for the Auto Wars scripts
+local ScriptsGroup = WarTab:AddLeftGroupbox("Scripts", "code") -- icon "code" for script toggles
 
-WarGroup:AddToggle("AutoJustify", {
+ScriptsGroup:AddToggle("AutoJustify", {
     Text = "Auto Justify War",
     Default = false,
     Callback = function(on)
@@ -301,7 +302,7 @@ WarGroup:AddToggle("AutoJustify", {
     end,
 })
 
-WarGroup:AddToggle("AutoDeclare", {
+ScriptsGroup:AddToggle("AutoDeclare", {
     Text = "Auto Declare War",
     Default = false,
     Callback = function(on)
@@ -315,7 +316,7 @@ WarGroup:AddToggle("AutoDeclare", {
     end,
 })
 
-WarGroup:AddToggle("AutoPeace", {
+ScriptsGroup:AddToggle("AutoPeace", {
     Text = "Auto Peace Wars",
     Default = false,
     Callback = function(on)
@@ -329,7 +330,7 @@ WarGroup:AddToggle("AutoPeace", {
     end,
 })
 
--- New separate groupbox for Rebel Watch toggles
+-- Rebel Watch groupbox separate for rebel watch toggles
 local RebelWatchGroup = WarTab:AddLeftGroupbox("Rebel Watch", "flag")
 
 RebelWatchGroup:AddToggle("RebelWatch", {
@@ -364,8 +365,8 @@ print("War automations v1.0.3 ready; toggle them in the UI to enable.")
 
 --[[
 Notes:
-- All main loops are throttled to once per second.
-- Notifications use the Obsidian Library:Notify method.
-- Rebel watch notifications avoid duplicates until funding changes.
-- Rebel watch toggles are organized in a separate groupbox for UI clarity.
+- All automation loops throttle updates to once per second.
+- Notifications use the Obsidian Library's Notify method to inform user actions.
+- Rebel Watch notifications intelligently avoid duplicates until funding changes.
+- UI groups are logically separated for clarity: Scripts and Rebel Watch.
 ]]
