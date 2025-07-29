@@ -1,460 +1,133 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
-local Window = Library:CreateWindow({
-    Title = "Debug",
-    Footer = "v1.0.3",
-    ToggleKeybind = Enum.KeyCode.RightControl,
-    Center = true,
-    AutoShow = true,
-})
+local AutomationsGroup = ScriptsTab:AddLeftGroupbox("Automations", "dollar-sign")
 
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-local workspace = game:GetService("Workspace")
-local JustifyWar = workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar")
-local ManageAlliance = workspace:WaitForChild("GameManager"):WaitForChild("ManageAlliance")
+local developInterval = 35
+local infrastructureInterval = 35
 
-local function getCountryByLeader()
-    for _, c in ipairs(workspace.CountryData:GetChildren()) do
-        local leader = c:FindFirstChild("Leader")
-        if leader and leader.Value == Players.LocalPlayer.Name then
-            return c.Name
-        end
-    end
-    return nil
-end
+local developRunning = false
+local infrastructureRunning = false
 
-local function hasConquestCB(ownCountry, target)
-    local ownData = workspace.CountryData:FindFirstChild(ownCountry)
-    if not ownData then return false end
-    local dip = ownData:FindFirstChild("Diplomacy")
-    if not dip then return false end
-    local cb = dip:FindFirstChild("CasusBelli")
-    if not cb then return false end
-    local conquest = cb:FindFirstChild("Conquest")
-    if not conquest then return false end
-    return conquest:FindFirstChild(target) ~= nil
-end
-
-local justifyConn = nil
-local declareConn = nil
-local peaceConn = nil
-local rebelWatchConn = nil
-local rebelWatchOwnConn = nil
-local justificationWatchConn = nil
-local justificationWatchOwnConn = nil
-
-local justified = {}
-local declared = {}
-local processedWars = {}
-
-local notifiedFunders = {}
-local notifiedOwnFunders = {}
-
-local notifiedJustifications = {}
-local notifiedOwnJustifications = {}
-
-local notifiedJustificationsOnOwn = {}
-
-local lastPeaceTime = 0
-
-local function startJustify()
-    justified = {}
-    local lastCheck = 0
-    justifyConn = RunService.Heartbeat:Connect(function()
-        local now = os.clock()
-        if now - lastCheck < 1 then return end
-        lastCheck = now
-        local myCountry = getCountryByLeader()
-        if not myCountry then return end
-        local countries = workspace.CountryData:GetChildren()
-        for _, c in ipairs(countries) do
-            local name = c.Name
-            if name ~= myCountry and not justified[name] and not hasConquestCB(myCountry, name) then
-                JustifyWar:FireServer(name, "Conquest")
-                Library:Notify({ Title = "Auto Justify", Description = "Justified war on " .. name, Time = 3 })
-                justified[name] = true
+local function startDevelopCity()
+    developRunning = true
+    spawn(function()
+        while developRunning do
+            local myCountry = getCountryByLeader()
+            if not myCountry then
+                wait(1)
+                continue
             end
+
+            local citiesFolder = workspace:FindFirstChild("Baseplate") and workspace.Baseplate:FindFirstChild("Cities") and workspace.Baseplate.Cities:FindFirstChild(myCountry)
+            if not citiesFolder then
+                wait(1)
+                continue
+            end
+
+            for _, city in ipairs(citiesFolder:GetChildren()) do
+                local tierValue = city:GetAttribute("tier") or 0
+                if tierValue < 10 then
+                    local args = {
+                        { city },
+                        "Develop City"
+                    }
+                    workspace.GameManager.CreateBuilding:FireServer(unpack(args))
+                end
+            end
+
+            wait(developInterval)
         end
     end)
 end
 
-local function stopJustify()
-    if justifyConn then
-        justifyConn:Disconnect()
-        justifyConn = nil
-    end
+local function stopDevelopCity()
+    developRunning = false
 end
 
-local function startDeclare()
-    declared = {}
-    local lastCheck = 0
-    declareConn = RunService.Heartbeat:Connect(function()
-        local now = os.clock()
-        if now - lastCheck < 1 then return end
-        lastCheck = now
-        local myCountry = getCountryByLeader()
-        if not myCountry then return end
-        local countries = workspace.CountryData:GetChildren()
-        for _, c in ipairs(countries) do
-            local name = c.Name
-            if name ~= myCountry and not declared[name] and hasConquestCB(myCountry, name) then
-                ManageAlliance:FireServer(name, "WarDeclare", "Conquest")
-                Library:Notify({ Title = "Auto Declare", Description = "Declared war on " .. name, Time = 3 })
-                declared[name] = true
+local function startInfrastructure()
+    infrastructureRunning = true
+    spawn(function()
+        while infrastructureRunning do
+            local myCountry = getCountryByLeader()
+            if not myCountry then
+                wait(1)
+                continue
             end
+
+            local citiesFolder = workspace:FindFirstChild("Baseplate") and workspace.Baseplate:FindFirstChild("Cities") and workspace.Baseplate.Cities:FindFirstChild(myCountry)
+            if not citiesFolder then
+                wait(1)
+                continue
+            end
+
+            for _, city in ipairs(citiesFolder:GetChildren()) do
+                local infraValue = city:GetAttribute("infrastructure") or 0
+                if infraValue < 10 then
+                    local args = {
+                        { city },
+                        "Infrastructure"
+                    }
+                    workspace.GameManager.CreateBuilding:FireServer(unpack(args))
+                end
+            end
+
+            wait(infrastructureInterval)
         end
     end)
 end
 
-local function stopDeclare()
-    if declareConn then
-        declareConn:Disconnect()
-        declareConn = nil
-    end
+local function stopInfrastructure()
+    infrastructureRunning = false
 end
 
-local function startPeace()
-    processedWars = {}
-    lastPeaceTime = 0
-    peaceConn = RunService.Heartbeat:Connect(function()
-        local now = os.clock()
-        if now - lastPeaceTime < 1 then return end
-        lastPeaceTime = now
-        local myCountry = getCountryByLeader()
-        if not myCountry then return end
-        local warsFolder = workspace:FindFirstChild("Wars")
-        if not warsFolder then return end
-        for warName in pairs(processedWars) do
-            if not warsFolder:FindFirstChild(warName) then
-                processedWars[warName] = nil
-            end
-        end
-        for _, war in ipairs(warsFolder:GetChildren()) do
-            local warName = war.Name
-            if not processedWars[warName] then
-                local attacker = war:FindFirstChild("Attacker")
-                if attacker and attacker:FindFirstChild(myCountry) then
-                    local defender = war:FindFirstChild("Defender")
-                    if defender then
-                        for _, def in ipairs(defender:GetChildren()) do
-                            local defName = def.Name
-                            local args = {
-                                defName,
-                                "PeaceOut",
-                                {
-                                    warName,
-                                    "Demand",
-                                    {
-                                        AnnexSome = {},
-                                        Money = { Percentage = 75 },
-                                        Resource = { Percentage = 75 },
-                                    }
-                                }
-                            }
-                            ManageAlliance:FireServer(unpack(args))
-                            Library:Notify({ Title = "Auto Peace", Description = ("Sent PeaceOut to %s for %s"):format(defName, warName), Time = 3 })
-                        end
-                    end
-                    processedWars[warName] = true
-                end
-            end
-        end
-    end)
-end
-
-local function stopPeace()
-    if peaceConn then
-        peaceConn:Disconnect()
-        peaceConn = nil
-    end
-end
-
-local function startRebelWatch()
-    notifiedFunders = {}
-    rebelWatchConn = RunService.Heartbeat:Connect(function()
-        for _, countryData in ipairs(workspace.CountryData:GetChildren()) do
-            local countryName = countryData.Name
-            local rebelFolder = countryData:FindFirstChild("Rebel")
-            if rebelFolder then
-                notifiedFunders[countryName] = notifiedFunders[countryName] or {}
-                local currentFunders = {}
-                for _, funder in ipairs(rebelFolder:GetChildren()) do
-                    local funderName = funder.Name
-                    currentFunders[funderName] = true
-                    if not notifiedFunders[countryName][funderName] then
-                        Library:Notify({
-                            Title = "Rebel Funding Detected",
-                            Description = funderName .. " is funding rebels in " .. countryName,
-                            Time = 5,
-                        })
-                        notifiedFunders[countryName][funderName] = true
-                    end
-                end
-                for previousFunder, _ in pairs(notifiedFunders[countryName]) do
-                    if not currentFunders[previousFunder] then
-                        notifiedFunders[countryName][previousFunder] = nil
-                    end
-                end
-            else
-                notifiedFunders[countryName] = {}
-            end
-        end
-    end)
-end
-
-local function stopRebelWatch()
-    if rebelWatchConn then
-        rebelWatchConn:Disconnect()
-        rebelWatchConn = nil
-    end
-    notifiedFunders = {}
-end
-
-local function startRebelWatchOwn()
-    notifiedOwnFunders = {}
-    rebelWatchOwnConn = RunService.Heartbeat:Connect(function()
-        local myCountry = getCountryByLeader()
-        if not myCountry then return end
-        local countryData = workspace.CountryData:FindFirstChild(myCountry)
-        if not countryData then return end
-        local rebelFolder = countryData:FindFirstChild("Rebel")
-        if rebelFolder then
-            notifiedOwnFunders = notifiedOwnFunders or {}
-            local currentFunders = {}
-            for _, funder in ipairs(rebelFolder:GetChildren()) do
-                local funderName = funder.Name
-                currentFunders[funderName] = true
-                if not notifiedOwnFunders[funderName] then
-                    Library:Notify({
-                        Title = "Rebels Funded In Your Country",
-                        Description = funderName .. " is funding rebels in " .. myCountry,
-                        Time = 5,
-                    })
-                    notifiedOwnFunders[funderName] = true
-                end
-            end
-            for previousFunder, _ in pairs(notifiedOwnFunders) do
-                if not currentFunders[previousFunder] then
-                    notifiedOwnFunders[previousFunder] = nil
-                end
-            end
-        else
-            notifiedOwnFunders = {}
-        end
-    end)
-end
-
-local function stopRebelWatchOwn()
-    if rebelWatchOwnConn then
-        rebelWatchOwnConn:Disconnect()
-        rebelWatchOwnConn = nil
-    end
-    notifiedOwnFunders = {}
-end
-
-local function startJustificationWatch()
-    notifiedJustifications = {}
-    justificationWatchConn = RunService.Heartbeat:Connect(function()
-        for _, countryData in ipairs(workspace.CountryData:GetChildren()) do
-            local countryName = countryData.Name
-            local diplomacy = countryData:FindFirstChild("Diplomacy")
-            if diplomacy then
-                local actions = diplomacy:FindFirstChild("Actions")
-                if actions then
-                    notifiedJustifications[countryName] = notifiedJustifications[countryName] or {}
-                    local currentActions = {}
-                    for _, action in ipairs(actions:GetChildren()) do
-                        local targetCountry = action.Name
-                        currentActions[targetCountry] = true
-                        if not notifiedJustifications[countryName][targetCountry] then
-                            Library:Notify({
-                                Title = "Justification Started",
-                                Description = string.format("%s has started justifying on %s", countryName, targetCountry),
-                                Time = 5,
-                            })
-                            notifiedJustifications[countryName][targetCountry] = true
-                        end
-                    end
-                    for prevTarget, _ in pairs(notifiedJustifications[countryName]) do
-                        if not currentActions[prevTarget] then
-                            notifiedJustifications[countryName][prevTarget] = nil
-                        end
-                    end
-                else
-                    notifiedJustifications[countryName] = {}
-                end
-            end
-        end
-    end)
-end
-
-local function stopJustificationWatch()
-    if justificationWatchConn then
-        justificationWatchConn:Disconnect()
-        justificationWatchConn = nil
-    end
-    notifiedJustifications = {}
-end
-
-local function startJustificationWatchOwn()
-    notifiedJustificationsOnOwn = {}
-    justificationWatchOwnConn = RunService.Heartbeat:Connect(function()
-        local myCountry = getCountryByLeader()
-        if not myCountry then return end
-        for _, countryData in ipairs(workspace.CountryData:GetChildren()) do
-            local countryName = countryData.Name
-            if countryName ~= myCountry then
-                local diplomacy = countryData:FindFirstChild("Diplomacy")
-                if diplomacy then
-                    local actions = diplomacy:FindFirstChild("Actions")
-                    if actions then
-                        notifiedJustificationsOnOwn[countryName] = notifiedJustificationsOnOwn[countryName] or {}
-                        local currentTargets = {}
-                        for _, action in ipairs(actions:GetChildren()) do
-                            local targetCountry = action.Name
-                            if targetCountry == myCountry then
-                                currentTargets[targetCountry] = true
-                                if not notifiedJustificationsOnOwn[countryName][targetCountry] then
-                                    Library:Notify({
-                                        Title = "Justification Alert",
-                                        Description = string.format("%s is starting to justify on your country %s", countryName, myCountry),
-                                        Time = 5,
-                                    })
-                                    notifiedJustificationsOnOwn[countryName][targetCountry] = true
-                                end
-                            end
-                        end
-                        for prevTarget, _ in pairs(notifiedJustificationsOnOwn[countryName]) do
-                            if not currentTargets[prevTarget] then
-                                notifiedJustificationsOnOwn[countryName][prevTarget] = nil
-                            end
-                        end
-                    else
-                        notifiedJustificationsOnOwn[countryName] = {}
-                    end
-                else
-                    notifiedJustificationsOnOwn[countryName] = {}
-                end
-            else
-                notifiedJustificationsOnOwn[countryName] = {}
-            end
-        end
-    end)
-end
-
-local function stopJustificationWatchOwn()
-    if justificationWatchOwnConn then
-        justificationWatchOwnConn:Disconnect()
-        justificationWatchOwnConn = nil
-    end
-    notifiedJustificationsOnOwn = {}
-end
-
-local ScriptsTab = Window:AddTab("Scripts", "code", "Debugging")
-
-local ScriptsGroup = ScriptsTab:AddLeftGroupbox("Scripts", "shield")
-
-ScriptsGroup:AddToggle("AutoJustify", {
-    Text = "Auto Justify War",
+local developToggle = AutomationsGroup:AddToggle("DevelopCityAutomation", {
+    Text = "Develop City Automation",
     Default = false,
     Callback = function(on)
         if on then
-            startJustify()
-            Library:Notify({ Title = "Auto Justify", Description = "Enabled", Time = 3 })
+            startDevelopCity()
+            Library:Notify({ Title = "Develop City Automation", Description = "Enabled", Time = 3 })
         else
-            stopJustify()
-            Library:Notify({ Title = "Auto Justify", Description = "Disabled", Time = 3 })
+            stopDevelopCity()
+            Library:Notify({ Title = "Develop City Automation", Description = "Disabled", Time = 3 })
         end
     end,
 })
 
-ScriptsGroup:AddToggle("AutoDeclare", {
-    Text = "Auto Declare War",
+local developIntervalSlider = AutomationsGroup:AddSlider("DevelopCityInterval", {
+    Text = "Develop City Interval (sec)",
+    Default = 35,
+    Min = 35,
+    Max = 100,
+    Rounding = 0,
+    Compact = false,
+    Suffix = "s",
+    Callback = function(value)
+        developInterval = value
+    end,
+})
+
+local infrastructureToggle = AutomationsGroup:AddToggle("InfrastructureAutomation", {
+    Text = "Infrastructure Automation",
     Default = false,
     Callback = function(on)
         if on then
-            startDeclare()
-            Library:Notify({ Title = "Auto Declare", Description = "Enabled", Time = 3 })
+            startInfrastructure()
+            Library:Notify({ Title = "Infrastructure Automation", Description = "Enabled", Time = 3 })
         else
-            stopDeclare()
-            Library:Notify({ Title = "Auto Declare", Description = "Disabled", Time = 3 })
+            stopInfrastructure()
+            Library:Notify({ Title = "Infrastructure Automation", Description = "Disabled", Time = 3 })
         end
     end,
 })
 
-ScriptsGroup:AddToggle("AutoPeace", {
-    Text = "Auto Peace Wars",
-    Default = false,
-    Callback = function(on)
-        if on then
-            startPeace()
-            Library:Notify({ Title = "Auto Peace", Description = "Enabled", Time = 3 })
-        else
-            stopPeace()
-            Library:Notify({ Title = "Auto Peace", Description = "Disabled", Time = 3 })
-        end
+local infrastructureIntervalSlider = AutomationsGroup:AddSlider("InfrastructureInterval", {
+    Text = "Infrastructure Interval (sec)",
+    Default = 35,
+    Min = 35,
+    Max = 100,
+    Rounding = 0,
+    Compact = false,
+    Suffix = "s",
+    Callback = function(value)
+        infrastructureInterval = value
     end,
 })
-
-local RebelWatchGroup = ScriptsTab:AddLeftGroupbox("Rebel Watch", "flag")
-
-RebelWatchGroup:AddToggle("RebelWatch", {
-    Text = "Rebel Watch (Global)",
-    Default = false,
-    Callback = function(on)
-        if on then
-            startRebelWatch()
-            Library:Notify({ Title = "Rebel Watch (Global)", Description = "Enabled", Time = 3 })
-        else
-            stopRebelWatch()
-            Library:Notify({ Title = "Rebel Watch (Global)", Description = "Disabled", Time = 3 })
-        end
-    end,
-})
-
-RebelWatchGroup:AddToggle("RebelWatchOwn", {
-    Text = "Rebel Watch (Own Country)",
-    Default = false,
-    Callback = function(on)
-        if on then
-            startRebelWatchOwn()
-            Library:Notify({ Title = "Rebel Watch (Own Country)", Description = "Enabled", Time = 3 })
-        else
-            stopRebelWatchOwn()
-            Library:Notify({ Title = "Rebel Watch (Own Country)", Description = "Disabled", Time = 3 })
-        end
-    end,
-})
-
-local JustificationWatchGroup = ScriptsTab:AddLeftGroupbox("Justification Watch", "flag")
-
-JustificationWatchGroup:AddToggle("JustificationWatch", {
-    Text = "Justification Watch (Global)",
-    Default = false,
-    Callback = function(on)
-        if on then
-            startJustificationWatch()
-            Library:Notify({ Title = "Justification Watch (Global)", Description = "Enabled", Time = 3 })
-        else
-            stopJustificationWatch()
-            Library:Notify({ Title = "Justification Watch (Global)", Description = "Disabled", Time = 3 })
-        end
-    end,
-})
-
-JustificationWatchGroup:AddToggle("JustificationWatchOwn", {
-    Text = "Justification Watch (Own Country Target)",
-    Default = false,
-    Callback = function(on)
-        if on then
-            startJustificationWatchOwn()
-            Library:Notify({ Title = "Justification Watch (Own Country Target)", Description = "Enabled", Time = 3 })
-        else
-            stopJustificationWatchOwn()
-            Library:Notify({ Title = "Justification Watch (Own Country Target)", Description = "Disabled", Time = 3 })
-        end
-    end,
-})
-
-print("Scripts debugging v1.0.3 ready; toggle them in the UI to enable.")
-
