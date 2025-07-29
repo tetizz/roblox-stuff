@@ -281,14 +281,14 @@ local function stopRebelWatchOwn()
     notifiedOwnFunders = {}
 end
 
--- 6) UI: toggles for each script inside the "Auto Wars" tab with refined groupboxes
+-- 6) UI: toggles for each script inside the "War Automation" tab
 
-local WarTab = Window:AddTab("Auto Wars", "shield", "Debugging")
+local WarTab = Window:AddTab("War Automation", "shield", "Automated war features")
 
--- Scripts groupbox for the Auto Wars scripts
-local ScriptsGroup = WarTab:AddLeftGroupbox("Scripts", "code") -- icon "code" for script toggles
+-- Auto Wars groupbox for war automation toggles
+local AutoWarsGroup = WarTab:AddLeftGroupbox("Auto Wars", "code") -- Icon "code" for scripts
 
-ScriptsGroup:AddToggle("AutoJustify", {
+AutoWarsGroup:AddToggle("AutoJustify", {
     Text = "Auto Justify War",
     Default = false,
     Callback = function(on)
@@ -302,7 +302,7 @@ ScriptsGroup:AddToggle("AutoJustify", {
     end,
 })
 
-ScriptsGroup:AddToggle("AutoDeclare", {
+AutoWarsGroup:AddToggle("AutoDeclare", {
     Text = "Auto Declare War",
     Default = false,
     Callback = function(on)
@@ -316,7 +316,7 @@ ScriptsGroup:AddToggle("AutoDeclare", {
     end,
 })
 
-ScriptsGroup:AddToggle("AutoPeace", {
+AutoWarsGroup:AddToggle("AutoPeace", {
     Text = "Auto Peace Wars",
     Default = false,
     Callback = function(on)
@@ -361,12 +361,14 @@ RebelWatchGroup:AddToggle("RebelWatchOwn", {
     end,
 })
 
-print("War automations v1.0.3 ready; toggle them in the UI to enable.")
+print("War automation scripts v1.0.3 ready; toggle them in the UI to enable.")
 
 --[[
 Notes:
-- All automation loops throttle updates to once per second.
-- Notifications use the Obsidian Library's Notify method to inform user actions.
-- Rebel Watch notifications intelligently avoid duplicates until funding changes.
-- UI groups are logically separated for clarity: Scripts and Rebel Watch.
+- All loops throttle updates to one second.
+- Notifications are consistent with Obsidian UI usage.
+- Rebel Watch toggles reside in their own groupbox for clarity.
+- Tab renamed to "War Automation" with description "Automated war features".
 ]]
+
+
