@@ -584,4 +584,4 @@ local infrastructureIntervalSlider = AutomationsGroup:AddSlider("InfrastructureI
     end,
 })
 
-print("Scripts debugging v1.0.3 ready; toggle them in the UI to enable.")
+print("Scripts debugging v1.0.4 ready")
