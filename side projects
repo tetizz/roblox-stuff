@@ -15,12 +15,14 @@ local Window = Library:CreateWindow({
 local MainTab = Window:AddTab("Main", "home", "Auto-buyer")
 local LeftGroupbox = MainTab:AddLeftGroupbox("Control", "wrench")
 local InfoBox = MainTab:AddRightGroupbox("Status", "info")
+
 local StatusLabel = InfoBox:AddLabel("Idle")
 local ManaLabel = InfoBox:AddLabel("Mana: 0")
+local TotalButtonsLabel = InfoBox:AddLabel("Buttons unlocked: N/A") -- Moved below Mana label
 
 local AutoToggle = LeftGroupbox:AddToggle("AutoPathButtons", {
     Text = "Auto path to buttons",
-    Default = false,
+    Default = false, -- Disabled by default
     Tooltip = "Pathfind to affordable, non-premium buttons in your tycoon"
 })
 
@@ -43,15 +45,17 @@ local AGENT = { AgentRadius = 2, AgentHeight = 5, AgentCanJump = true }
 local char, hum, hrp
 local running = false
 local busy = false
-
-local selectionMode = "Closest" -- default value set initially
+local selectionMode = "Closest" -- default selection mode
 
 local function bindCharacter(c)
     char = c
     hum = c:WaitForChild("Humanoid")
     hrp = c:WaitForChild("HumanoidRootPart")
 end
-if localPlayer.Character then bindCharacter(localPlayer.Character) end
+
+if localPlayer.Character then
+    bindCharacter(localPlayer.Character)
+end
 localPlayer.CharacterAdded:Connect(bindCharacter)
 
 local function toast(txt)
@@ -235,9 +239,9 @@ task.spawn(function()
         local ratio, unlocked, total = getButtonProgressRatio()
         if ratio then
             local percent = string.format("%.2f", ratio * 100)
-            StatusLabel:SetText(("Buttons unlocked: %d / %d (%s%%)"):format(unlocked, total, percent))
+            TotalButtonsLabel:SetText(("Buttons unlocked: %d / %d (%s%%)"):format(unlocked, total, percent))
         else
-            StatusLabel:SetText("Buttons unlocked: N/A")
+            TotalButtonsLabel:SetText("Buttons unlocked: N/A")
         end
 
         ManaLabel:SetText("Mana: " .. tostring(getMana()))
@@ -285,4 +289,3 @@ AutoToggle:OnChanged(function(val)
     toast("Auto-path is " .. (val and "ON" or "OFF"))
     print("AutoPathButtons toggled:", val)
 end)
-
