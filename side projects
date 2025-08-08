@@ -6,7 +6,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local Window = Library:CreateWindow({
     Title = "Auto Tycoon Buttons",
-    Footer = "v1.1.0",            -- Updated version here
+    Footer = "v1.2.0",            -- Updated version here
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
@@ -107,7 +107,7 @@ local function getButtonPivotPos(inst)
     return nil
 end
 
--- isValidButton returns true/false, reason or cost, pos
+-- isValidButton returns: bool isValid, string reasonOrCostOrNil, Position or nil
 local function isValidButton(inst)
     local name = string.lower(inst.Name)
 
@@ -121,7 +121,8 @@ local function isValidButton(inst)
 
     local cost = inst:GetAttribute("UnlockCost")
     if typeof(cost) ~= "number" then
-        return false, "UnlockCost attribute missing or invalid"
+        -- Silently skip if UnlockCost missing or invalid
+        return false, nil
     end
 
     if getMana() < cost then
@@ -150,7 +151,7 @@ local function isValidButton(inst)
     return true, cost, pos
 end
 
--- Only gather and evaluate descendants whose name contains "button"
+-- Only gather and validate descendants with "button" in the name
 local function gatherCandidates(root)
     local list = {}
     for _, inst in ipairs(root:GetDescendants()) do
@@ -158,11 +159,13 @@ local function gatherCandidates(root)
             local ok, reasonOrCost, pos = isValidButton(inst)
             if ok then
                 table.insert(list, { inst = inst, cost = reasonOrCost, pos = pos })
-            else
-                print("Ignoring button '" .. inst.Name .. "': " .. (reasonOrCost or "Unknown reason"))
+            elseif reasonOrCost then
+                -- Only print if reason provided (skip silent ignores like missing UnlockCost)
+                print("Ignoring button '" .. inst.Name .. "': " .. reasonOrCost)
             end
+            -- Silent if reasonOrCost is nil
         end
-        -- No print for non-button descendants
+        -- No processing or prints for non-buttons
     end
     return list
 end
@@ -321,4 +324,3 @@ AutoToggle:OnChanged(function(val)
     toast("Auto-path is " .. (val and "ON" or "OFF"))
     print("AutoPathButtons toggled:", val)
 end)
-
