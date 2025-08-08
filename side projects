@@ -1,1 +1,240 @@
+-- // Auto Tycoon Button Pathfinder + Obsidian Toggle
+-- // Stops exactly on Button_Base pivot, mana-gated, notifications, and UI toggle.
+
+-- Services (aligned = signs, 1 space each side)
+local Players            = game:GetService("Players")
+local PathfindingService = game:GetService("PathfindingService")
+local StarterGui         = game:GetService("StarterGui")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+
+-- Obsidian UI
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))()
+local Window  = Library:CreateWindow({
+    Title         = "Auto Tycoon Buttons",
+    Footer        = "v1.0.0",
+    ToggleKeybind = Enum.KeyCode.RightControl,
+    Center        = true,
+    AutoShow      = true
+})
+
+local MainTab      = Window:AddTab("Main", "home", "Auto-buyer")
+local LeftGroupbox = MainTab:AddLeftGroupbox("Control", "wrench")
+local InfoBox      = MainTab:AddRightGroupbox("Status", "info")
+
+local StatusLabel  = InfoBox:AddLabel("Idle")
+local ManaLabel    = InfoBox:AddLabel("Mana: 0")
+
+-- Toggle that controls the whole feature
+local AutoToggle = LeftGroupbox:AddToggle("AutoPathButtons", {
+    Text     = "Auto path to buttons",
+    Default  = false,
+    Tooltip  = "Pathfind to affordable, non-premium buttons in your tycoon"
+})
+
+-- Config
+local SCAN_INTERVAL = 1.25
+local MAX_RANGE     = 500
+local AGENT         = { AgentRadius = 2, AgentHeight = 5, AgentCanJump = true }
+
+-- Locals
+local player = Players.LocalPlayer
+local char, hum, hrp
+local running = false
+local busy    = false
+
+local function bindCharacter(c)
+    char = c
+    hum  = c:WaitForChild("Humanoid")
+    hrp  = c:WaitForChild("HumanoidRootPart")
+end
+if player.Character then bindCharacter(player.Character) end
+player.CharacterAdded:Connect(bindCharacter)
+
+local function toast(txt)
+    Library:Notify({ Title = "Auto Tycoon", Description = txt, Time = 2 })
+end
+
+-- Resolve your tycoon model
+local function getMyTycoon()
+    local map     = workspace:FindFirstChild("Map")
+    local tycoons = map and map:FindFirstChild("Tycoons")
+    if not tycoons then return nil end
+
+    local mine = tycoons:FindFirstChild(player.Name)
+    if mine and mine:IsA("Model") then return mine end
+
+    for _, m in ipairs(tycoons:GetChildren()) do
+        if m:IsA("Model") and m:GetAttribute("OwnerUserId") == player.UserId then
+            return m
+        end
+    end
+    return nil
+end
+
+-- Mana
+local function getMana()
+    local pd   = player:FindFirstChild("PlayerData")
+    local mana = pd and pd:FindFirstChild("Mana")
+    return (mana and mana.Value) or 0
+end
+
+-- Exact world position preference: Button_Base -> PrimaryPart -> Pivot
+local function getButtonPivotPos(inst)
+    local model = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
+    if model then
+        local btnBase = model:FindFirstChild("Button_Base")
+        if btnBase and btnBase:IsA("BasePart") then
+            return btnBase:GetPivot().Position
+        end
+        if model.PrimaryPart then
+            return model.PrimaryPart:GetPivot().Position
+        end
+        return model:GetPivot().Position
+    elseif inst:IsA("BasePart") then
+        return inst:GetPivot().Position
+    end
+    return nil
+end
+
+-- Candidate rules (your 3 checks)
+local function isValidButton(inst)
+    local name = string.lower(inst.Name)
+    if not string.find(name, "button") then return false end
+    if string.find(name, "premium") then return false end
+
+    local cost = inst:GetAttribute("UnlockCost")
+    if typeof(cost) ~= "number" then return false end
+    if getMana() < cost then return false end
+
+    local pos = getButtonPivotPos(inst)
+    if not pos then return false end
+    if hrp and (hrp.Position - pos).Magnitude > MAX_RANGE then return false end
+
+    return true, cost, pos
+end
+
+-- Optional: check for any TextLabel with "stored" in name and show its text (for debugging/info)
+local function getStoredLabelText(inst)
+    local model = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
+    if not model then return nil end
+    for _, d in ipairs(model:GetDescendants()) do
+        if d:IsA("TextLabel") and string.find(string.lower(d.Name), "stored") then
+            return d.Text
+        end
+    end
+    return nil
+end
+
+-- Gather & choose target
+local function gatherCandidates(root)
+    local list = {}
+    for _, inst in ipairs(root:GetDescendants()) do
+        if inst:IsA("Model") or inst:IsA("BasePart") then
+            local ok, cost, pos = isValidButton(inst)
+            if ok then
+                table.insert(list, { inst = inst, cost = cost, pos = pos })
+            end
+        end
+    end
+    return list
+end
+
+local function pickNearest(cands)
+    if not hrp then return nil end
+    local best, bestD
+    for _, c in ipairs(cands) do
+        local d = (hrp.Position - c.pos).Magnitude
+        if not best or d < bestD then
+            best  = c
+            bestD = d
+        end
+    end
+    return best
+end
+
+-- Move exactly to pos
+local function moveExactlyTo(pos)
+    if not hrp or not hum then return false end
+    local path = PathfindingService:CreatePath(AGENT)
+    path:ComputeAsync(hrp.Position, pos)
+    if path.Status ~= Enum.PathStatus.Success then return false end
+
+    for _, wp in ipairs(path:GetWaypoints()) do
+        hum:MoveTo(wp.Position)
+        local ok = hum.MoveToFinished:Wait(6)
+        if not ok then return false end
+    end
+
+    hum:MoveTo(pos)
+    hum.MoveToFinished:Wait(3)
+    return true
+end
+
+-- Listen for actual press on a proximity prompt and notify
+local function connectPressOnce(modelOrPart)
+    local model = modelOrPart:IsA("Model") and modelOrPart or modelOrPart:FindFirstAncestorWhichIsA("Model")
+    if not model then return end
+    local prompt = model:FindFirstChildOfClass("ProximityPrompt") or modelOrPart:FindFirstChildOfClass("ProximityPrompt")
+    if not prompt then return end
+
+    local conn
+    conn = prompt.Triggered:Connect(function(p)
+        if p == player then
+            toast("Pressed target: " .. (modelOrPart.Name))
+            if conn then conn:Disconnect() end
+        end
+    end)
+end
+
+-- Main worker
+task.spawn(function()
+    while true do
+        ManaLabel:SetText("Mana: " .. tostring(getMana()))
+
+        if running and not busy and hrp and hum then
+            busy = true
+            StatusLabel:SetText("Searching...")
+            toast("Searching for vaild target...")
+
+            local tycoon = getMyTycoon()
+            if not tycoon then
+                StatusLabel:SetText("Tycoon not found")
+                busy = false
+                task.wait(SCAN_INTERVAL)
+                continue
+            end
+
+            local cands  = gatherCandidates(tycoon)
+            local target = pickNearest(cands)
+
+            if target then
+                StatusLabel:SetText("Target: " .. target.inst.Name)
+                toast("Vaild target found: " .. target.inst.Name)
+                toast("Pathfinding to vaild target: " .. target.inst.Name)
+
+                local stored = getStoredLabelText(target.inst)
+                if stored then
+                    print(("Stored label on %s: %s"):format(target.inst.Name, stored))
+                end
+
+                connectPressOnce(target.inst)
+                moveExactlyTo(target.pos)
+                StatusLabel:SetText("Arrived: " .. target.inst.Name)
+            else
+                StatusLabel:SetText("No vaild target")
+            end
+
+            busy = false
+        end
+
+        task.wait(SCAN_INTERVAL)
+    end
+end)
+
+-- Toggle wiring
+AutoToggle:OnChanged(function(val)
+    running = val
+    StatusLabel:SetText(val and "Enabled" or "Disabled")
+    toast("Auto-path is " .. (val and "ON" or "OFF"))
+end)
 
