@@ -6,7 +6,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local Window = Library:CreateWindow({
     Title = "Auto Tycoon Buttons",
-    Footer = "v1.4.0",            -- Updated version
+    Footer = "v1.5.0",            -- Updated version
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
@@ -161,10 +161,7 @@ local function gatherCandidates(root)
 end
 
 local function pickTargetBySelection(cands)
-    if #cands == 0 then
-        return nil
-    end
-    if not hrp then
+    if #cands == 0 or not hrp then
         return nil
     end
 
@@ -209,36 +206,49 @@ local function pickTargetBySelection(cands)
     end
 end
 
--- Move with pathfinding, confirm arrival if within 1 stud threshold
 local function moveExactlyTo(pos)
     if not hrp or not hum then
         return false
     end
+
     local path = PathfindingService:CreatePath(AGENT)
-    path:ComputeAsync(hrp.Position, pos)
-    if path.Status ~= Enum.PathStatus.Success then
+    local success, errMsg = pcall(function()
+        path:ComputeAsync(hrp.Position, pos)
+    end)
+    if not success then
+        warn("Path computation failed with error:", errMsg)
         return false
     end
-    for _, wp in ipairs(path:GetWaypoints()) do
+
+    if path.Status ~= Enum.PathStatus.Success then
+        warn("Pathfinding failed: status =", path.Status.Name)
+        return false
+    end
+
+    local waypoints = path:GetWaypoints()
+    for _, wp in ipairs(waypoints) do
         hum:MoveTo(wp.Position)
-        local ok = hum.MoveToFinished:Wait(6)
-        if not ok then
+        local reached = hum.MoveToFinished:Wait(6)
+        if not reached then
+            warn("Failed to reach waypoint: ", wp.Position)
             return false
         end
     end
+
     hum:MoveTo(pos)
-    local arrivalTime = os.clock()
-    local maxWait = 5
-    while (os.clock() - arrivalTime) < maxWait do
+    local arriveTime = os.clock()
+    local maxWait = 5 -- seconds
+
+    while os.clock() - arriveTime < maxWait do
         if (hrp.Position - pos).Magnitude <= 1 then -- 1 stud threshold
             return true
         end
         task.wait(0.05)
     end
+
     return (hrp.Position - pos).Magnitude <= 1
 end
 
--- Auto trigger proximity prompt when nearby
 local function autoTriggerPrompt(modelOrPart)
     local model = modelOrPart:IsA("Model") and modelOrPart or modelOrPart:FindFirstAncestorWhichIsA("Model")
     if not model then return end
