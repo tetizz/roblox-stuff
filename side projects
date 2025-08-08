@@ -48,6 +48,7 @@ local function getMyTycoon()
     local map = workspace:FindFirstChild("Map")
     local tycoons = map and map:FindFirstChild("Tycoons")
     if not tycoons then return nil end
+    
     local mine = tycoons:FindFirstChild(player.Name)
     if mine and mine:IsA("Model") then return mine end
     for _, m in ipairs(tycoons:GetChildren()) do
@@ -161,12 +162,38 @@ local function connectPressOnce(modelOrPart)
     end)
 end
 
+local function getButtonProgressRatio()
+    local bp = player:FindFirstChild("ButtonProgress")
+    if not bp then
+        return nil, nil, nil
+    end
+    local unlocked = bp:FindFirstChild("UnlockedButtons")
+    local total = bp:FindFirstChild("TotalButtons")
+    if not unlocked or not total then
+        return nil, nil, nil
+    end
+    local unlockedVal = unlocked.Value
+    local totalVal = total.Value
+    if type(unlockedVal) ~= "number" or type(totalVal) ~= "number" or totalVal <= 0 then
+        return nil, nil, nil
+    end
+    return unlockedVal / totalVal, unlockedVal, totalVal
+end
+
 task.spawn(function()
     while true do
+        local ratio, unlocked, total = getButtonProgressRatio()
+        if ratio then
+            local percent = string.format("%.2f", ratio * 100)
+            StatusLabel:SetText(("Buttons unlocked: %d / %d (%s%%)"):format(unlocked, total, percent))
+        else
+            StatusLabel:SetText("Buttons unlocked: N/A")
+        end
+
         ManaLabel:SetText("Mana: " .. tostring(getMana()))
+
         if running and not busy and hrp and hum then
             busy = true
-            StatusLabel:SetText("Searching...")
             toast("Searching for valid target...")
             print("Searching for valid target buttons...")
             local tycoon = getMyTycoon()
