@@ -6,7 +6,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local Window = Library:CreateWindow({
     Title = "Auto Tycoon Buttons",
-    Footer = "v1.7.1",            -- Updated version
+    Footer = "v1.7.2",            -- Updated version
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
@@ -22,7 +22,7 @@ local TotalButtonsLabel = InfoBox:AddLabel("Buttons unlocked: N/A") -- Below Man
 
 local AutoToggle = LeftGroupbox:AddToggle("AutoPathButtons", {
     Text = "Auto path to buttons",
-    Default = false, -- Disabled by default
+    Default = false,
     Tooltip = "Pathfind to affordable, non-premium buttons in your tycoon"
 })
 
@@ -48,11 +48,11 @@ local ScanIntervalSlider = LeftGroupbox:AddSlider("ScanInterval", {
     Default = 0.3,
     Min = 0,
     Max = 2,
-    Rounding = 1,        -- Adjusted for 0.1 steps in UI lib
+    Rounding = 1,
     Precision = 1,
     Tooltip = "How often to scan for valid buttons (0 to 2 seconds, step 0.1)",
     Callback = function(value)
-        SCAN_INTERVAL = math.clamp(math.floor(value * 10 + 0.5) / 10, 0, 2) -- Round to 0.1
+        SCAN_INTERVAL = math.clamp(math.floor(value * 10 + 0.5) / 10, 0, 2)
         print(string.format("Scan interval set to: %.1f seconds", SCAN_INTERVAL))
         Library:Notify({
             Title = "Scan Interval",
@@ -62,15 +62,16 @@ local ScanIntervalSlider = LeftGroupbox:AddSlider("ScanInterval", {
     end,
 })
 
-local SCAN_INTERVAL = 0.3  -- Default scan interval (seconds)
+local SCAN_INTERVAL = 0.3
 local AGENT = { AgentRadius = 2, AgentHeight = 5, AgentCanJump = true }
-local WAYPOINT_WAIT_TIME = 3 -- seconds waiting per waypoint
-local FINAL_ARRIVAL_MAX_WAIT = 2 -- timeout for arriving at final position
+local WAYPOINT_WAIT_TIME = 3
+local FINAL_ARRIVAL_MAX_WAIT = 2
+local ARRIVAL_THRESHOLD = 0.3 -- threshold in studs for arrival
 
 local char, hum, hrp
 local running = false
 local busy = false
-local selectionMode = "Closest" -- default target selection
+local selectionMode = "Closest"
 
 local function bindCharacter(c)
     char = c
@@ -90,21 +91,17 @@ end
 local function getMyTycoon()
     local map = workspace:FindFirstChild("Map")
     if not map then return nil end
-
     local tycoons = map:FindFirstChild("Tycoons")
     if not tycoons then return nil end
-
     local playerTycoonFolder = tycoons:FindFirstChild(localPlayer.Name)
     if not playerTycoonFolder then return nil end
-
     return playerTycoonFolder
 end
 
 local function getMana()
     local pd = localPlayer:FindFirstChild("PlayerData")
     local mana = pd and pd:FindFirstChild("Mana")
-    local amount = (mana and mana.Value) or 0
-    return amount
+    return (mana and mana.Value) or 0
 end
 
 local function getButtonPivotPos(inst)
@@ -126,24 +123,19 @@ end
 
 local function isValidButton(inst)
     local name = string.lower(inst.Name)
-
     if not string.find(name, "button") then
         return false, "Name does not contain 'button'"
     end
-
     if string.find(name, "premium") then
         return false, "Button is premium"
     end
-
     local cost = inst:GetAttribute("UnlockCost")
     if typeof(cost) ~= "number" then
-        return false, nil -- silently skip missing cost
+        return false, nil
     end
-
     if getMana() < cost then
         return false, "Not enough mana"
     end
-
     local playerRebirth = 0
     local pd = localPlayer:FindFirstChild("PlayerData")
     if pd then
@@ -152,17 +144,14 @@ local function isValidButton(inst)
             playerRebirth = rebirthValue.Value
         end
     end
-
     local rebirthReq = inst:GetAttribute("RebirthReq")
     if rebirthReq and type(rebirthReq) == "number" and playerRebirth < rebirthReq then
         return false, "Rebirth requirement not met"
     end
-
     local pos = getButtonPivotPos(inst)
     if not pos then
         return false, "Button position could not be determined"
     end
-
     return true, cost, pos
 end
 
@@ -185,7 +174,6 @@ local function pickTargetBySelection(cands)
     if #cands == 0 or not hrp then
         return nil
     end
-
     if selectionMode == "Closest" then
         local best, bestD
         for _, c in ipairs(cands) do
@@ -231,7 +219,6 @@ local function moveExactlyTo(pos)
     if not hrp or not hum then
         return false
     end
-
     local path = PathfindingService:CreatePath(AGENT)
     local success, errMsg = pcall(function()
         path:ComputeAsync(hrp.Position, pos)
@@ -240,12 +227,10 @@ local function moveExactlyTo(pos)
         warn("Path compute error:", errMsg)
         return false
     end
-
     if path.Status ~= Enum.PathStatus.Success then
         warn("Pathfinding failed: status =", path.Status.Name)
         return false
     end
-
     local waypoints = path:GetWaypoints()
     for _, wp in ipairs(waypoints) do
         hum:MoveTo(wp.Position)
@@ -256,12 +241,30 @@ local function moveExactlyTo(pos)
         end
     end
 
-    -- Final precise move, wait for MoveToFinished event; no distance check
     hum:MoveTo(pos)
-    local arrived = hum.MoveToFinished:Wait(FINAL_ARRIVAL_MAX_WAIT)
-    if not arrived then
-        warn("Failed to reach final position: ", pos)
+    local startTime = os.clock()
+    local arrived = false
+
+    while os.clock() - startTime < FINAL_ARRIVAL_MAX_WAIT do
+        local dist = (hrp.Position - pos).Magnitude
+        if dist <= ARRIVAL_THRESHOLD then
+            arrived = true
+            break
+        end
+        if hum.MoveToFinished:Wait(0.1) then
+            arrived = true
+            break
+        end
+        task.wait(0.05)
     end
+
+    if not arrived then
+        local lateArrive = hum.MoveToFinished:Wait(0)
+        if lateArrive then
+            arrived = true
+        end
+    end
+
     return arrived
 end
 
@@ -348,4 +351,3 @@ AutoToggle:OnChanged(function(val)
     toast("Auto-path is " .. (val and "ON" or "OFF"))
     print("AutoPathButtons toggled:", val)
 end)
-
