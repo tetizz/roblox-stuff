@@ -1,4 +1,4 @@
--- v1.9.3 - Removed walking/jumping to collection zone since CollectZone size covers all
+-- v1.9.3 - No collect zone walking (giant zone handles it automatically)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -62,7 +62,7 @@ local function disableForcefields()
     end
 end
 
--- Character
+-- Character bind
 local function bindCharacter(c)
     char = c
     hum = c:WaitForChild("Humanoid")
@@ -95,9 +95,7 @@ local function isValidButton(inst)
     local name = string.lower(inst.Name)
     if not name:find("button") then return false, "No 'button' in name" end
     local model = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
-    if not (model and model:FindFirstChild("Button_Indicator", true)) then
-        return false, "No Button_Indicator"
-    end
+    if not (model and model:FindFirstChild("Button_Indicator", true)) then return false, "No Button_Indicator" end
     local hasCollidable = false
     for _, part in ipairs(model:GetDescendants()) do
         if part:IsA("BasePart") and part.CanCollide then hasCollidable = true break end
@@ -106,7 +104,7 @@ local function isValidButton(inst)
     local cost = inst:GetAttribute("UnlockCost")
     if type(cost) ~= "number" then return false, nil end
     if getMana() < cost then return false, "Not enough mana" end
-    -- Active RebirthReq
+    -- RebirthReq active
     local playerRebirth = 0
     local pd = localPlayer:FindFirstChild("PlayerData")
     if pd then
@@ -127,9 +125,7 @@ local function gatherCandidates(root)
     for _, inst in ipairs(root:GetDescendants()) do
         if inst.Name:lower():find("button") then
             local ok, costOrReason, pos = isValidButton(inst)
-            if ok then
-                table.insert(list, { inst = inst, cost = costOrReason, pos = pos })
-            end
+            if ok then table.insert(list, { inst = inst, cost = costOrReason, pos = pos }) end
         end
     end
     return list
