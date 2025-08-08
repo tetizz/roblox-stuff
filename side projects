@@ -1,16 +1,17 @@
--- v1.9.10 - Add mastery display in StatusLabel, teleport buttons, disable collisions, alternating CollectZone
+-- v1.9.11 - Added Auto Get Weapons toggle, keeping all prior features
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local ProximityPromptService = game:GetService("ProximityPromptService")
+local RunService = game:GetService("RunService")
 
 local localPlayer = Players.LocalPlayer
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 
 local Window = Library:CreateWindow({
-    Title = "Auto Tycoon Buttons",
-    Footer = "v1.9.10",
+    Title = "Auto Tycoon Buttons & Weapons",
+    Footer = "v1.9.11",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
@@ -22,10 +23,15 @@ local LeftGroupbox = MainTab:AddLeftGroupbox("Control", "wrench")
 local InfoBox = MainTab:AddRightGroupbox("Status", "info")
 
 local StatusLabel = InfoBox:AddLabel("Idle")
+StatusLabel.TextYAlignment = Enum.TextYAlignment.Bottom
+StatusLabel.TextWrapped = true
+StatusLabel.TextTruncate = Enum.TextTruncate.None
+
 local ManaLabel = InfoBox:AddLabel("Mana: 0")
 local TotalButtonsLabel = InfoBox:AddLabel("Buttons unlocked: N/A")
 
 local AutoToggle = LeftGroupbox:AddToggle("AutoPathButtons", { Text = "Auto path to buttons", Default = false })
+local AutoGetWeaponsToggle = LeftGroupbox:AddToggle("AutoGetWeapons", { Text = "Auto get weapons", Default = false })
 local TargetSelectDropdown = LeftGroupbox:AddDropdown("TargetSelection", { Text = "Target Selection", Default = "Closest", Values = { "Closest", "Cheapest", "Most Expensive" }, Multi = false })
 local ScanIntervalSlider = LeftGroupbox:AddSlider("ScanInterval", { Text = "Scan Interval (seconds)", Default = 0.3, Min = 0, Max = 2, Rounding = 1, Precision = 1 })
 
@@ -34,6 +40,7 @@ local SCAN_INTERVAL = 0.3
 
 -- State variables
 local running, busy, rebirthInProgress, didUpgradeThisRebirth = false, false, false, false
+local autoGetWeaponsRunning = false
 local char, hum, hrp
 local sizeLoopActive = false
 
@@ -247,7 +254,7 @@ local function bringButtonToPlayer(buttonInstance)
     end
 end
 
--- Trigger proximity prompt
+-- Proximity prompt trigger on target
 local function autoTriggerPrompt(target)
     local model = target:IsA("Model") and target or target:FindFirstAncestorWhichIsA("Model")
     local prompt = model and model:FindFirstChildOfClass("ProximityPrompt") or target:FindFirstChildOfClass("ProximityPrompt")
@@ -276,7 +283,7 @@ local function getMasteryStatus()
         end
     end
 
-    return table.concat(parts, " | ")
+    return table.concat(parts, "\n")
 end
 
 -- Rebirth process with upgrades and mastery element pick
@@ -324,6 +331,123 @@ local function startRebirthSequence()
     alternateCollectZoneSize()
 end
 
+-- === Auto get weapons implementation ===
+
+-- Stores the original CFrame of bases currently moved to player
+local weaponBaseOriginalCFrames = {}
+
+local function hasWeaponInBackpack(weaponName)
+    local backpack = localPlayer:FindFirstChild("Backpack")
+    if not backpack then return false end
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool.Name == weaponName then
+            return true
+        end
+    end
+    return false
+end
+
+local function getSpellStandsBases()
+    local bases = {} -- { basePart, weaponName, originalCFrame }
+
+    local myTycoon = getMyTycoon()
+    if not myTycoon then return bases end
+
+    for _, folder in ipairs(myTycoon:GetChildren()) do
+        -- For each child folder (like F1_SpellStand_1)
+        if folder:IsA("Model") or folder:IsA("Folder") then
+            for _, candidate in ipairs(folder:GetChildren()) do
+                if candidate.Name == "Base" and candidate:IsA("BasePart") then
+                    -- Check if it has exactly 2 ProximityPrompt children
+                    local prompts = {}
+                    for _, child in ipairs(candidate:GetChildren()) do
+                        if child:IsA("ProximityPrompt") then
+                            table.insert(prompts, child)
+                        end
+                    end
+                    if #prompts == 2 then
+                        -- Check ActionText on prompts for weapon name(s)
+                        -- We'll pick the first prompt's ActionText as the weapon name to check in backpack
+                        local weaponName = prompts[1].ActionText
+
+                        if weaponName and weaponName ~= "" then
+                            table.insert(bases, {
+                                base = candidate,
+                                weaponName = weaponName,
+                                originalCFrame = candidate.CFrame,
+                            })
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return bases
+end
+
+local function bringBaseToPlayer(basePart)
+    if not hrp then return end
+    basePart.CanCollide = false
+    basePart.Massless = true
+    basePart.CFrame = hrp.CFrame * CFrame.new(0, 0, -2)
+end
+
+local function returnBaseToOriginal(baseData)
+    if baseData and baseData.base and baseData.originalCFrame then
+        baseData.base.CanCollide = true
+        baseData.base.Massless = false
+        baseData.base.CFrame = baseData.originalCFrame
+        weaponBaseOriginalCFrames[baseData.base] = nil
+    end
+end
+
+local function autoGetWeapons()
+    -- Get all spellstand bases with weapon names
+    local bases = getSpellStandsBases()
+    for _, baseData in ipairs(bases) do
+        local base = baseData.base
+        local weaponName = baseData.weaponName
+
+        -- If we moved this base before and weapon already acquired, move base back to original position
+        if weaponBaseOriginalCFrames[base] and hasWeaponInBackpack(weaponName) then
+            returnBaseToOriginal(baseData)
+        end
+    end
+
+    -- Try to find a weapon base not yet acquired
+    for _, baseData in ipairs(bases) do
+        local base = baseData.base
+        local weaponName = baseData.weaponName
+
+        if not hasWeaponInBackpack(weaponName) then
+            -- Store original CFrame if not stored
+            if not weaponBaseOriginalCFrames[base] then
+                weaponBaseOriginalCFrames[base] = base.CFrame
+            end
+            -- Teleport to player
+            bringBaseToPlayer(base)
+
+            -- Trigger both ProximityPrompts on base to pick up weapon(s)
+            for _, child in ipairs(base:GetChildren()) do
+                if child:IsA("ProximityPrompt") then
+                    if hrp and (hrp.Position - child.Parent.Position).Magnitude <= child.MaxActivationDistance then
+                        child:InputHoldBegin()
+                        task.wait(child.HoldDuration + 0.1)
+                        child:InputHoldEnd()
+                    end
+                end
+            end
+
+            -- Only attempt one weapon at a time
+            StatusLabel:SetText("Getting Weapon: " .. weaponName)
+            return
+        end
+    end
+
+    -- If no weapons to get, clear status except mastery
+    StatusLabel:SetText(getMasteryStatus())
+end
+
 -- === Main loop ===
 task.spawn(function()
     while true do
@@ -342,7 +466,9 @@ task.spawn(function()
         ManaLabel:SetText("Mana: " .. tostring(getMana()))
 
         -- Update mastery status in StatusLabel every cycle
-        StatusLabel:SetText(getMasteryStatus())
+        if not busy then -- avoid clobbering during busy actions
+            StatusLabel:SetText(getMasteryStatus())
+        end
 
         if running and not busy and not rebirthInProgress then
             busy = true
@@ -357,7 +483,6 @@ task.spawn(function()
                     autoTriggerPrompt(target.inst)
                     StatusLabel:SetText("Activated: " .. target.inst.Name)
                 else
-                    -- If no targets, show mastery status instead to avoid flicker
                     StatusLabel:SetText(getMasteryStatus())
                 end
             else
@@ -366,11 +491,24 @@ task.spawn(function()
             busy = false
         end
 
+        -- Auto get weapons loop
+        if autoGetWeaponsRunning and not busy and not rebirthInProgress then
+            busy = true
+            autoGetWeapons()
+            busy = false
+        end
+
         task.wait(SCAN_INTERVAL)
     end
 end)
 
+-- Toggle handlers
 AutoToggle:OnChanged(function(v)
     running = v
-    StatusLabel:SetText(v and "Enabled" or "Disabled")
+    StatusLabel:SetText(v and "Enabled Auto Path" or "Disabled Auto Path")
+end)
+
+AutoGetWeaponsToggle:OnChanged(function(v)
+    autoGetWeaponsRunning = v
+    StatusLabel:SetText(v and "Enabled Auto Get Weapons" or "Disabled Auto Get Weapons")
 end)
