@@ -1,4 +1,4 @@
--- v1.9.18 - Mastery display fully dynamic (auto-expand lines), instant debris pickup, all features
+-- v1.9.18b - Mastery labels always update/fresh, no stacking, instant debris pickup & all features
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,13 +9,12 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deivi
 
 local Win = Library:CreateWindow({
     Title = "Auto Tycoon Bot",
-    Footer = "v1.9.18",
+    Footer = "v1.9.18b",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
 })
 
--- UI
 local TabMain = Win:AddTab("Main", "home")
 local LeftBox = TabMain:AddLeftGroupbox("Control", "wrench")
 local StatusBox = TabMain:AddRightGroupbox("Status", "info")
@@ -26,8 +25,7 @@ StatusLbl.TextWrapped = true
 StatusLbl.TextTruncate = Enum.TextTruncate.None
 
 local StatsBox = TabMain:AddRightGroupbox("Stats", "clipboard-list")
--- Dynamic mastery labels will populate this box
-local masteryLbls = {}
+local masteryLbls = {} -- for dynamic mastery display
 
 local ManaLbl = StatusBox:AddLabel("Mana: 0")
 local ButtonsLbl = StatusBox:AddLabel("Buttons unlocked: N/A")
@@ -406,7 +404,7 @@ local function autoGetWeapon()
     end
 end
 
--- Debris pickup at/above/below player, instant
+-- --- Debris pickup at/above/below player, instant
 local function teleportDebrisParts()
     local debris = Workspace:FindFirstChild("Debris")
     if not debris or not hrp then return end
@@ -423,11 +421,13 @@ local function teleportDebrisParts()
     end
 end
 
--- --- DYNAMIC MASTERY LABELS ---
+-- --- DYNAMIC MASTERY LABELS (UPDATED) ---
 local function updateMasteryLabels(masteryStr)
-    -- Remove old labels
+    -- Remove old labels before adding new. Fixes stacking/repeat.
     for _, lbl in ipairs(masteryLbls) do
-        pcall(function() lbl:Remove() end)
+        if lbl and typeof(lbl.Remove) == "function" then
+            pcall(function() lbl:Remove() end)
+        end
     end
     masteryLbls = {}
 
