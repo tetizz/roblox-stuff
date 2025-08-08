@@ -1,4 +1,4 @@
--- v1.9.16 - Mastery always in stats box, never status; crystal/manana debris teleport, v1.9.10 teleport
+-- v1.9.17 - Debris pickup at/above/below player, mastery only in stats, upgraded reliability, all features
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,13 +9,13 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deivi
 
 local Win = Library:CreateWindow({
     Title = "Auto Tycoon Bot",
-    Footer = "v1.9.16",
+    Footer = "v1.9.17",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
 })
 
--- UI Setup
+-- UI
 local TabMain = Win:AddTab("Main", "home")
 local LeftBox = TabMain:AddLeftGroupbox("Control", "wrench")
 local StatusBox = TabMain:AddRightGroupbox("Status", "info")
@@ -30,6 +30,9 @@ local MasteryLbl = StatsBox:AddLabel("Mastery will appear here")
 MasteryLbl.TextYAlignment = Enum.TextYAlignment.Top
 MasteryLbl.TextWrapped = true
 MasteryLbl.TextTruncate = Enum.TextTruncate.None
+pcall(function()
+    MasteryLbl:SetSize(Vector2.new(260, 280))
+end)
 
 local ManaLbl = StatusBox:AddLabel("Mana: 0")
 local ButtonsLbl = StatusBox:AddLabel("Buttons unlocked: N/A")
@@ -119,7 +122,6 @@ local function altCollectZone()
 end
 altCollectZone()
 
--- Attribute helpers
 local function attrAnywhere(m, key)
     if not m or not key then return false end
     if m:GetAttribute(key) ~= nil then return true end
@@ -140,7 +142,6 @@ local function getAttrAnywhere(m, key)
     return nil
 end
 
--- Button logic
 local function getBtnPos(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not m then return nil end
@@ -194,7 +195,6 @@ local function gatherCands(root)
     return res
 end
 
--- Teleport buttons or models (v1.9.10 style)
 local function bringBtn(inst)
     if not hrp then return end
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
@@ -268,7 +268,6 @@ local function doRebirth()
 
     local repEv = ReplicatedStorage:WaitForChild("RemoteEvents")
     repEv.RebirthCallback:InvokeServer(Players:WaitForChild(plr.Name))
-
     task.wait(3)
 
     if not didUpg then
@@ -307,7 +306,6 @@ end
 
 -- Weapon bring logic (example path)
 local spellStandPath = {"Map", "Tycoons", "dark776389", "F1_SpellStand_1"}
-
 local baseState, baseOrigCFrame = {}, {}
 
 local function findSpellStandModel()
@@ -411,28 +409,28 @@ local function autoGetWeapon()
         StatusLbl:SetText("Getting weapon: " .. weaponName)
         return
     end
-
-    -- FIXED: mastery display never in StatusLbl!
-    -- MasteryLbl:SetText(getMasteryStr())
 end
 
--- Debris part teleport helper (includes Purple/Blue Crystal)
+-- Debris teleport to player (at, above, and below, instant)
 local function teleportDebrisParts()
     local debris = Workspace:FindFirstChild("Debris")
-    if not debris then return end
+    if not debris or not hrp then return end
+    local offsets = {Vector3.new(0,2,0), Vector3.new(0,0,0), Vector3.new(0,-2,0)}
     for _, name in ipairs({"Premium_Manana", "Manana", "Purple_Crystal", "Blue_Crystal"}) do
         local part = debris:FindFirstChild(name)
-        if part and part:IsA("BasePart") and hrp then
+        if part and part:IsA("BasePart") then
             part.CanCollide = false
             part.Massless = true
-            part.CFrame = hrp.CFrame * CFrame.new(0, 0, -2)
+            for _, v in ipairs(offsets) do
+                part.CFrame = hrp.CFrame + v
+            end
         end
     end
 end
 
 -- Mastery stats update task
 task.spawn(function()
-    MasteryLbl:SetText(getMasteryStr()) -- immediate
+    MasteryLbl:SetText(getMasteryStr())
     while true do
         if tick() >= masteryPauseUntil then
             local s, e = pcall(function()
@@ -444,7 +442,6 @@ task.spawn(function()
     end
 end)
 
--- Main loop
 task.spawn(function()
     while true do
         local bp = plr:FindFirstChild("ButtonProgress")
@@ -476,7 +473,7 @@ task.spawn(function()
                     triggerPrompt(targ.inst)
                     StatusLbl:SetText("Activated: " .. targ.inst.Name)
                 else
-                    MasteryLbl:SetText(getMasteryStr()) -- FIXED: mastery only in mastery box
+                    MasteryLbl:SetText(getMasteryStr()) -- Mastery only in stats box
                 end
             else
                 StatusLbl:SetText("Tycoon not found")
