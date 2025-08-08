@@ -1,4 +1,4 @@
--- v1.9.14 - Teleport fix, shorter names, mana load fix, mastery immediate update, improved auto get weapons
+-- v1.9.15 - Bring entire spell stand model for weapon pickup, mastery in separate box, fixed mana loading, teleport fixes
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,18 +9,18 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deivi
 
 local Win = Library:CreateWindow({
     Title = "Auto Tycoon Bot",
-    Footer = "v1.9.14",
+    Footer = "v1.9.15",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
 })
 
--- UI
+-- UI Setup
 local TabMain = Win:AddTab("Main", "home")
 local LeftBox = TabMain:AddLeftGroupbox("Control", "wrench")
-local InfoBox = TabMain:AddRightGroupbox("Status", "info")
+local StatusBox = TabMain:AddRightGroupbox("Status", "info")
 
-local StatusLbl = InfoBox:AddLabel("Idle")
+local StatusLbl = StatusBox:AddLabel("Idle")
 StatusLbl.TextYAlignment = Enum.TextYAlignment.Top
 StatusLbl.TextWrapped = true
 StatusLbl.TextTruncate = Enum.TextTruncate.None
@@ -31,32 +31,43 @@ MasteryLbl.TextYAlignment = Enum.TextYAlignment.Top
 MasteryLbl.TextWrapped = true
 MasteryLbl.TextTruncate = Enum.TextTruncate.None
 
-local ManaLbl = InfoBox:AddLabel("Mana: 0")
-local ButtonsLbl = InfoBox:AddLabel("Buttons unlocked: N/A")
+local ManaLbl = StatusBox:AddLabel("Mana: 0")
+local ButtonsLbl = StatusBox:AddLabel("Buttons unlocked: N/A")
 
 local TogAutoBtn = LeftBox:AddToggle("AutoBtn", { Text = "Auto path buttons", Default = false })
 local TogAutoWpn = LeftBox:AddToggle("AutoWpn", { Text = "Auto get weapons", Default = false })
-local DDTargetSel = LeftBox:AddDropdown("TargetSel", { Text = "Target Selection", Default = "Closest", Values = { "Closest", "Cheapest", "Most Expensive" }, Multi = false })
-local SliderScan = LeftBox:AddSlider("ScanInt", { Text = "Scan Interval (sec)", Default = 0.3, Min = 0, Max = 2, Rounding = 1, Precision = 1 })
+local DDTargetSel = LeftBox:AddDropdown("TargetSel", {
+    Text = "Target Selection",
+    Default = "Closest",
+    Values = {"Closest", "Cheapest", "Most Expensive"},
+    Multi = false,
+})
+local SliderScan = LeftBox:AddSlider("ScanInt", {
+    Text = "Scan Interval (sec)",
+    Default = 0.3,
+    Min = 0,
+    Max = 2,
+    Rounding = 1,
+    Precision = 1,
+})
 
--- Settings & state
+-- Settings & state vars
 local SCAN_INT = 0.3
-
 local running, busy, rebirthing, didUpg = false, false, false, false
 local autoWpnRunning = false
 local char, hum, hrp
 local sizeLoopActive = false
 local masteryPauseUntil = 0
 
--- Async references for PlayerData and Mana
+-- Async refs for PlayerData and Mana
 local PlayerData, ManaVal
 
--- Notify helper
+-- Notify
 local function notify(msg)
-    Library:Notify({ Title = "Auto Tycoon", Description = msg, Time = 2 })
+    Library:Notify({Title = "Auto Tycoon", Description = msg, Time = 2})
 end
 
--- Wait for PlayerData & Mana
+-- Wait PlayerData & Mana loading
 task.spawn(function()
     repeat
         PlayerData = plr:FindFirstChild("PlayerData")
@@ -72,7 +83,7 @@ local function getMana()
     return (ManaVal and ManaVal.Value) or 0
 end
 
--- Bind current character
+-- Bind character
 local function bindChar(c)
     char = c
     hum = c:WaitForChild("Humanoid")
@@ -81,7 +92,7 @@ end
 if plr.Character then bindChar(plr.Character) end
 plr.CharacterAdded:Connect(bindChar)
 
--- Restart-safe CollectZone pulse loop
+-- Restart-safe CollectZone pulsing
 local function altCollectZone()
     sizeLoopActive = false
     task.wait(0.1)
@@ -99,15 +110,21 @@ local function altCollectZone()
                         if not sizeLoopActive then break end
                         z.Size = Vector3.new(1950, 1950, 1950)
                         task.wait(2)
-                    else task.wait(2) end
-                else task.wait(2) end
-            else task.wait(2) end
+                    else
+                        task.wait(2)
+                    end
+                else
+                    task.wait(2)
+                end
+            else
+                task.wait(2)
+            end
         end
     end)
 end
 altCollectZone()
 
--- Disable forcefields collisions
+-- Forcefield ignore (same as before)
 local function disableFF()
     local myT = Workspace.Map.Tycoons:FindFirstChild(plr.Name)
     if myT then
@@ -128,7 +145,7 @@ local function disableFF()
     end
 end
 
--- Helpers: attributes
+-- Helpers for attributes presence anywhere
 local function attrAnywhere(m, key)
     if not m or not key then return false end
     if m:GetAttribute(key) ~= nil then return true end
@@ -149,7 +166,7 @@ local function getAttrAnywhere(m, key)
     return nil
 end
 
--- Buttons logic
+-- Button helpers
 local function getBtnPos(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not m then return nil end
@@ -161,12 +178,9 @@ end
 
 local function validBtn(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
-    if not (m and m:FindFirstChild("Button_Indicator", true)) then
-        return false, "No Indicator"
-    end
-    if not attrAnywhere(m, "Premium") and not attrAnywhere(m, "RebirthReq") then
-        return false, "No Premium/RebirthReq"
-    end
+    if not (m and m:FindFirstChild("Button_Indicator", true)) then return false, "No Indicator" end
+    if not attrAnywhere(m, "Premium") and not attrAnywhere(m, "RebirthReq") then return false, "No Premium/RebirthReq" end
+
     local hasCollidable = false
     for _, p in ipairs(m:GetDescendants()) do
         if p:IsA("BasePart") and p.CanCollide then
@@ -180,20 +194,20 @@ local function validBtn(inst)
     if type(cost) ~= "number" then return false, nil end
     if getMana() < cost then return false, "Not enough mana" end
 
-    local playerRebirth = 0
+    local rebirthVal = 0
     if PlayerData then
-        local rebVal = PlayerData:FindFirstChild("Rebirth")
-        if rebVal and typeof(rebVal.Value) == "number" then
-            playerRebirth = rebVal.Value
+        local val = PlayerData:FindFirstChild("Rebirth")
+        if val and typeof(val.Value) == "number" then
+            rebirthVal = val.Value
         end
     end
 
     local rebReq = getAttrAnywhere(m, "RebirthReq")
-    if rebReq and type(rebReq) == "number" and playerRebirth < rebReq then
-        return false, "Rebirth req not met"
+    if rebReq and type(rebReq) == "number" and rebirthVal < rebReq then
+        return false, "Rebirth requirement not met"
     end
 
-    if not getBtnPos(inst) then return false, "No pos" end
+    if not getBtnPos(inst) then return false, "No position" end
     return true, cost, getBtnPos(inst)
 end
 
@@ -206,39 +220,35 @@ local function gatherCands(root)
     return res
 end
 
--- Teleport buttons (fixed)
+-- Teleport buttons fixed (moves all parts)
 local function bringBtn(inst)
     if not hrp then return end
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     local targetCf = hrp.CFrame * CFrame.new(0, 0, -2)
+    if not m then return end
 
-    if m then
-        if not m.PrimaryPart then
-            local prim = m:FindFirstChildWhichIsA("BasePart")
-            if prim then m.PrimaryPart = prim end
-        end
-        if m.PrimaryPart then
-            local offset = targetCf.Position - m.PrimaryPart.Position
-            for _, p in ipairs(m:GetDescendants()) do
-                if p:IsA("BasePart") then
-                    p.CanCollide = false
-                    p.Massless = true
-                    p.CFrame = p.CFrame + offset
-                end
-            end
-        else
-            for _, p in ipairs(m:GetDescendants()) do
-                if p:IsA("BasePart") then
-                    p.CanCollide = false
-                    p.Massless = true
-                    p.CFrame = targetCf
-                end
+    if not m.PrimaryPart then
+        local prim = m:FindFirstChildWhichIsA("BasePart")
+        if prim then m.PrimaryPart = prim end
+    end
+
+    if m.PrimaryPart then
+        local offset = targetCf.Position - m.PrimaryPart.Position
+        for _, p in ipairs(m:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.CanCollide = false
+                p.Massless = true
+                p.CFrame = p.CFrame + offset
             end
         end
-    elseif inst:IsA("BasePart") then
-        inst.CanCollide = false
-        inst.Massless = true
-        inst.CFrame = targetCf
+    else
+        for _, p in ipairs(m:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.CanCollide = false
+                p.Massless = true
+                p.CFrame = targetCf
+            end
+        end
     end
 end
 
@@ -252,7 +262,7 @@ local function triggerPrompt(tgt)
     end
 end
 
--- Mastery stat string
+-- Mastery string
 local function getMasteryStr()
     if not PlayerData then return "No PlayerData" end
     local mastery = PlayerData:FindFirstChild("Mastery")
@@ -298,7 +308,7 @@ local function doRebirth()
         for _, el in ipairs(mastery:GetChildren()) do
             if type(el.Value) == "number" and el.Value >= 0 then
                 if el.Value < minV then
-                    opts = { el.Name }
+                    opts = {el.Name}
                     minV = el.Value
                 elseif el.Value == minV then
                     table.insert(opts, el.Name)
@@ -312,18 +322,25 @@ local function doRebirth()
     repEv.PickCallback:InvokeServer()
 
     rebirthing = false
-
     altCollectZone()
     masteryPauseUntil = tick() + 10
 end
 
--- Auto get weapons enhancements
+-- Auto get weapons for specified model path (bringing entire model)
+local spellStandPath = {"Map", "Tycoons", "dark776389", "F1_SpellStand_1"}
 
-local baseOrigCFrames = {}
-local baseStates = {}
--- state: "idle", "teleported", "returned"
+-- Track bases' states
+local baseState = {} -- key = model, value = "idle", "teleported", "returned"
+local baseOrigCFrame = {} -- key = model, value = CFrame
 
--- Check if weapon owned
+local function findSpellStandModel()
+    local obj = Workspace
+    for _, part in ipairs(spellStandPath) do
+        if obj then obj = obj:FindFirstChild(part) else break end
+    end
+    return obj
+end
+
 local function hasWeapon(name)
     local backpack = plr:FindFirstChild("Backpack")
     if not backpack then return false end
@@ -333,119 +350,114 @@ local function hasWeapon(name)
     return false
 end
 
--- Get all spell stand bases from all tycoons
-local function getAllBases()
-    local res = {}
-    local TFolder = Workspace.Map:FindFirstChild("Tycoons")
-    if not TFolder then return res end
-
-    for _, tycoon in ipairs(TFolder:GetChildren()) do
-        if tycoon:IsA("Folder") or tycoon:IsA("Model") then
-            for _, spFolder in ipairs(tycoon:GetChildren()) do
-                if spFolder:IsA("Folder") or spFolder:IsA("Model") then
-                    for _, c in ipairs(spFolder:GetChildren()) do
-                        if c.Name == "Base" and c:IsA("BasePart") then
-                            local prompts = {}
-                            for _, child in ipairs(c:GetChildren()) do
-                                if child:IsA("ProximityPrompt") then
-                                    table.insert(prompts, child)
-                                end
-                            end
-                            if #prompts == 2 then
-                                local wpnName = prompts[1].ActionText
-                                if wpnName and wpnName ~= "" then
-                                    table.insert(res, {
-                                        base = c,
-                                        weapon = wpnName,
-                                        origCFrame = c.CFrame,
-                                    })
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    return res
-end
-
-local function bringBase(b)
-    if not hrp then return end
-    b.CanCollide = false
-    b.Massless = true
-    b.CFrame = hrp.CFrame * CFrame.new(0,0,-2)
-end
-
-local function returnBase(data)
-    if data and data.base and data.origCFrame then
-        data.base.CanCollide = true
-        data.base.Massless = false
-        data.base.CFrame = data.origCFrame
-        baseOrigCFrames[data.base] = nil
-        baseStates[data.base] = nil
-    end
-end
-
-local function autoGetWpn()
-    local bases = getAllBases()
-
-    -- Return bases for owned weapons, one per loop
-    for _, data in ipairs(bases) do
-        local b = data.base
-        local wpn = data.weapon
-        local st = baseStates[b]
-        if st == "teleported" and hasWeapon(wpn) then
-            returnBase(data)
-            StatusLbl:SetText("Returned base for weapon: " .. wpn)
+local function bringModelToPlayer(model)
+    if not (model and hrp) then return end
+    if not model.PrimaryPart then
+        local prim = model:FindFirstChildWhichIsA("BasePart")
+        if prim then
+            model.PrimaryPart = prim
+        else
             return
         end
     end
+    local targetCf = hrp.CFrame * CFrame.new(0, 0, -2)
+    local offset = targetCf.Position - model.PrimaryPart.Position
+    for _, p in ipairs(model:GetDescendants()) do
+        if p:IsA("BasePart") then
+            p.CanCollide = false
+            p.Massless = true
+            p.CFrame = p.CFrame + offset
+        end
+    end
+end
 
-    -- Teleport bases needing pickup, one per loop
-    for _, data in ipairs(bases) do
-        local b = data.base
-        local wpn = data.weapon
-        local st = baseStates[b] or "idle"
-        if st == "idle" and not hasWeapon(wpn) then
-            if not baseOrigCFrames[b] then baseOrigCFrames[b] = b.CFrame end
-            bringBase(b)
-            baseStates[b] = "teleported"
-
-            -- Trigger both prompts once
-            for _, p in ipairs(b:GetChildren()) do
-                if p:IsA("ProximityPrompt") then
-                    if hrp and (hrp.Position - p.Parent.Position).Magnitude <= p.MaxActivationDistance then
-                        p:InputHoldBegin()
-                        task.wait(p.HoldDuration + 0.1)
-                        p:InputHoldEnd()
-                    end
-                end
+local function returnModelToOriginal(model)
+    if not model then return end
+    local orig = baseOrigCFrame[model]
+    if orig then
+        for _, p in ipairs(model:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.CanCollide = true
+                p.Massless = false
             end
-            StatusLbl:SetText("Getting Weapon: " .. wpn)
-            return
+        end
+        model:PivotTo(orig)
+        baseOrigCFrame[model] = nil
+        baseState[model] = nil
+    end
+end
+
+local function autoGetWeapon()
+    local model = findSpellStandModel()
+    if not model then
+        StatusLbl:SetText("Spell stand model not found")
+        return
+    end
+
+    -- Assume weapon name from first ProximityPrompt's ActionText inside the model
+    local prompts = {}
+    for _, d in ipairs(model:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            table.insert(prompts, d)
         end
     end
 
-    StatusLbl:SetText(getMasteryStr()) -- nothing else to do
+    if #prompts < 1 then
+        StatusLbl:SetText("No proximity prompts found in spell stand")
+        return
+    end
+
+    local weaponName = prompts[1].ActionText
+    if not weaponName or weaponName == "" then
+        StatusLbl:SetText("Weapon name missing from prompt")
+        return
+    end
+
+    local st = baseState[model] or "idle"
+
+    if st == "teleported" and hasWeapon(weaponName) then
+        returnModelToOriginal(model)
+        StatusLbl:SetText("Returned spell stand base for weapon: "..weaponName)
+        return
+    end
+
+    if st == "idle" and not hasWeapon(weaponName) then
+        baseOrigCFrame[model] = model:GetPivot()
+        bringModelToPlayer(model)
+        baseState[model] = "teleported"
+
+        -- Trigger all proximity prompts inside model
+        for _, p in ipairs(prompts) do
+            if hrp and (hrp.Position - p.Parent.Position).Magnitude <= p.MaxActivationDistance and p.Enabled then
+                p:InputHoldBegin()
+                task.wait(p.HoldDuration + 0.1)
+                p:InputHoldEnd()
+            end
+        end
+
+        StatusLbl:SetText("Getting weapon: " .. weaponName)
+        return
+    end
+
+    -- If have weapon or no action needed, just update mastery display
+    StatusLbl:SetText(getMasteryStr())
 end
 
--- Mastery update task with pause after rebirth
+-- Mastery update task
 task.spawn(function()
-    MasteryLbl:SetText(getMasteryStr()) -- immediate at start
+    MasteryLbl:SetText(getMasteryStr()) -- immediate
     while true do
         if tick() >= masteryPauseUntil then
-            local s, e = pcall(function()
+            local s,e = pcall(function()
                 MasteryLbl:SetText(getMasteryStr())
             end)
-            if not s then warn("Mastery update err:", e) end
+            if not s then warn("Mastery update error:", e) end
         end
         task.wait(3)
     end
 end)
 
--- Main
+-- Main loop
 task.spawn(function()
     while true do
         local bp = plr:FindFirstChild("ButtonProgress")
@@ -463,7 +475,7 @@ task.spawn(function()
         ManaLbl:SetText("Mana: " .. tostring(getMana()))
 
         if not busy then
-            -- Mastery updated by separate loop
+            -- Mastery updates handled in separate task
         end
 
         if running and not busy and not rebirthing then
@@ -489,7 +501,7 @@ task.spawn(function()
 
         if autoWpnRunning and not busy and not rebirthing then
             busy = true
-            autoGetWpn()
+            autoGetWeapon()
             busy = false
         end
 
@@ -497,7 +509,7 @@ task.spawn(function()
     end
 end)
 
--- Toggles
+-- Toggles handlers
 TogAutoBtn:OnChanged(function(v)
     running = v
     StatusLbl:SetText(v and "Enabled Auto Path" or "Disabled Auto Path")
@@ -507,3 +519,4 @@ TogAutoWpn:OnChanged(function(v)
     autoWpnRunning = v
     StatusLbl:SetText(v and "Enabled Auto Get Weapons" or "Disabled Auto Get Weapons")
 end)
+
