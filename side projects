@@ -62,18 +62,22 @@ local function toast(txt)
     Library:Notify({ Title = "Auto Tycoon", Description = txt, Time = 2 })
 end
 
+-- Dynamic getMyTycoon for any player, fetching TycoonTemplate under player's folder
 local function getMyTycoon()
     local map = workspace:FindFirstChild("Map")
-    local tycoons = map and map:FindFirstChild("Tycoons")
+    if not map then return nil end
+
+    local tycoons = map:FindFirstChild("Tycoons")
     if not tycoons then return nil end
 
-    local mine = tycoons:FindFirstChild(localPlayer.Name)
-    if mine and mine:IsA("Model") then return mine end
-    for _, m in ipairs(tycoons:GetChildren()) do
-        if m:IsA("Model") and m:GetAttribute("OwnerUserId") == localPlayer.UserId then
-            return m
-        end
+    local playerTycoonFolder = tycoons:FindFirstChild(localPlayer.Name)
+    if not playerTycoonFolder then return nil end
+
+    local tycoonTemplate = playerTycoonFolder:FindFirstChild("TycoonTemplate")
+    if tycoonTemplate and tycoonTemplate:IsA("Model") then
+        return tycoonTemplate
     end
+
     return nil
 end
 
@@ -289,3 +293,4 @@ AutoToggle:OnChanged(function(val)
     toast("Auto-path is " .. (val and "ON" or "OFF"))
     print("AutoPathButtons toggled:", val)
 end)
+
