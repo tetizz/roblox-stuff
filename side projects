@@ -107,6 +107,7 @@ local function getButtonPivotPos(inst)
     return nil
 end
 
+-- Updated isValidButton to return reason why invalid
 local function isValidButton(inst)
     local name = string.lower(inst.Name)
 
@@ -127,7 +128,6 @@ local function isValidButton(inst)
         return false, "Not enough mana"
     end
 
-    -- Get player's rebirth value safely from PlayerData
     local playerRebirth = 0
     local pd = localPlayer:FindFirstChild("PlayerData")
     if pd then
@@ -150,10 +150,11 @@ local function isValidButton(inst)
     return true, cost, pos
 end
 
+-- Only checks descendants whose name contains "button" before isValidButton call
 local function gatherCandidates(root)
     local list = {}
     for _, inst in ipairs(root:GetDescendants()) do
-        if inst:IsA("Model") or inst:IsA("BasePart") then
+        if string.find(string.lower(inst.Name), "button") then
             local ok, reasonOrCost, pos = isValidButton(inst)
             if ok then
                 table.insert(list, { inst = inst, cost = reasonOrCost, pos = pos })
@@ -202,7 +203,6 @@ local function pickTargetBySelection(cands)
         end
         return best
     else
-        -- fallback to closest
         local best, bestD
         for _, c in ipairs(cands) do
             local d = (hrp.Position - c.pos).Magnitude
