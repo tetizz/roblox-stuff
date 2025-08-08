@@ -1,9 +1,8 @@
--- v1.9.4 - Teleport button to player for instant activation, no walking
+-- v1.9.6 - Teleport button to player, disable button collision, alternate CollectZone size
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
-local PathfindingService = game:GetService("PathfindingService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 
 local localPlayer = Players.LocalPlayer
@@ -11,14 +10,14 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deivi
 
 local Window = Library:CreateWindow({
     Title = "Auto Tycoon Buttons",
-    Footer = "v1.9.4",
+    Footer = "v1.9.6",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
 })
 
 -- UI
-local MainTab = Window:AddTab("Main", "home", "Auto-buyer")
+local MainTab = Window:AddTab("Main", "home")
 local LeftGroupbox = MainTab:AddLeftGroupbox("Control", "wrench")
 local InfoBox = MainTab:AddRightGroupbox("Status", "info")
 
@@ -32,16 +31,42 @@ local ScanIntervalSlider = LeftGroupbox:AddSlider("ScanInterval", { Text = "Scan
 
 -- Settings
 local SCAN_INTERVAL = 0.3
-local ARRIVAL_THRESHOLD = 0.3  -- Kept for potential future use but unused now
 
 -- State
 local running, busy, rebirthInProgress, didUpgradeThisRebirth = false, false, false, false
 local selectionMode, char, hum, hrp = "Closest"
 
--- Helpers
 local function toast(msg) Library:Notify({ Title = "Auto Tycoon", Description = msg, Time = 2 }) end
 
--- Forcefield ignore (still useful to avoid any physical obstruction)
+-- === Alternate CollectZone size every 2 seconds ===
+local function alternateCollectZoneSize()
+    task.spawn(function()
+        while true do
+            local myTycoon = Workspace.Map.Tycoons:FindFirstChild(localPlayer.Name)
+            if myTycoon and myTycoon:FindFirstChild("TycoonTemplate") then
+                local tCollectZone = myTycoon.TycoonTemplate:FindFirstChild("T_Collect_Zone")
+                if tCollectZone then
+                    local zonePart = tCollectZone:FindFirstChild("CollectZone")
+                    if zonePart and zonePart:IsA("BasePart") then
+                        zonePart.Size = Vector3.new(2050, 2050, 2050) -- bigger
+                        task.wait(2)
+                        zonePart.Size = Vector3.new(1950, 1950, 1950) -- smaller
+                        task.wait(2)
+                    else
+                        task.wait(2)
+                    end
+                else
+                    task.wait(2)
+                end
+            else
+                task.wait(2)
+            end
+        end
+    end)
+end
+alternateCollectZoneSize()
+
+-- === Forcefield ignore ===
 local function disableForcefields()
     local myTycoon = Workspace.Map.Tycoons:FindFirstChild(localPlayer.Name)
     if myTycoon then
@@ -62,6 +87,7 @@ local function disableForcefields()
     end
 end
 
+-- === Character bind ===
 local function bindCharacter(c)
     char = c
     hum = c:WaitForChild("Humanoid")
@@ -71,8 +97,7 @@ if localPlayer.Character then bindCharacter(localPlayer.Character) end
 localPlayer.CharacterAdded:Connect(bindCharacter)
 
 local function getMyTycoon()
-    local tycoons = Workspace.Map:FindFirstChild("Tycoons")
-    return tycoons and tycoons:FindFirstChild(localPlayer.Name)
+    return Workspace.Map.Tycoons:FindFirstChild(localPlayer.Name)
 end
 
 local function getMana()
@@ -80,7 +105,7 @@ local function getMana()
     return (pd and pd:FindFirstChild("Mana") and pd.Mana.Value) or 0
 end
 
--- Buttons
+-- === Button logic ===
 local function getButtonPivotPos(inst)
     local model = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not model then return nil end
@@ -103,7 +128,7 @@ local function isValidButton(inst)
     local cost = inst:GetAttribute("UnlockCost")
     if type(cost) ~= "number" then return false, nil end
     if getMana() < cost then return false, "Not enough mana" end
-    -- Active RebirthReq check
+    -- RebirthReq check active
     local playerRebirth = 0
     local pd = localPlayer:FindFirstChild("PlayerData")
     if pd then
@@ -130,7 +155,7 @@ local function gatherCandidates(root)
     return list
 end
 
--- Teleport the button to the player's HumanoidRootPart
+-- === Teleport button to player, disable collisions ===
 local function bringButtonToPlayer(buttonInstance)
     local character = localPlayer.Character
     if not character then return end
@@ -144,15 +169,25 @@ local function bringButtonToPlayer(buttonInstance)
             if primary then buttonModel.PrimaryPart = primary end
         end
         if buttonModel.PrimaryPart then
-            -- Move the button model to 2 studs in front of the player
             buttonModel:SetPrimaryPartCFrame(hrp.CFrame * CFrame.new(0, 0, -2))
         elseif buttonInstance:IsA("BasePart") then
-            -- Single part button fallback
             buttonInstance.CFrame = hrp.CFrame * CFrame.new(0, 0, -2)
         end
+        -- Disable collisions for all parts of the button
+        for _, part in ipairs(buttonModel:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+                part.Massless = true
+            end
+        end
+    elseif buttonInstance:IsA("BasePart") then
+        buttonInstance.CFrame = hrp.CFrame * CFrame.new(0, 0, -2)
+        buttonInstance.CanCollide = false
+        buttonInstance.Massless = true
     end
 end
 
+-- === Prompt trigger ===
 local function autoTriggerPrompt(target)
     local model = target:IsA("Model") and target or target:FindFirstAncestorWhichIsA("Model")
     local prompt = model and model:FindFirstChildOfClass("ProximityPrompt") or target:FindFirstChildOfClass("ProximityPrompt")
@@ -163,7 +198,7 @@ local function autoTriggerPrompt(target)
     end
 end
 
--- Rebirth procedure
+-- === Rebirth sequence ===
 local function startRebirthSequence()
     rebirthInProgress = true
     didUpgradeThisRebirth = false
@@ -201,7 +236,7 @@ local function startRebirthSequence()
     rebirthInProgress = false
 end
 
--- Main loop
+-- === Main loop ===
 task.spawn(function()
     while true do
         local bp = localPlayer:FindFirstChild("ButtonProgress")
@@ -225,13 +260,13 @@ task.spawn(function()
                 local cands = gatherCandidates(tycoon)
                 if #cands > 0 then
                     local target = cands[1]
-                    StatusLabel:SetText("Bringing button: " .. target.inst.Name)
+                    StatusLabel:SetText("Bringing: " .. target.inst.Name)
                     bringButtonToPlayer(target.inst)
-                    task.wait(0.1)  -- brief pause to allow teleport
+                    task.wait(0.1)
                     autoTriggerPrompt(target.inst)
                     StatusLabel:SetText("Activated button: " .. target.inst.Name)
                 else
-                    StatusLabel:SetText("No valid target (check console)")
+                    StatusLabel:SetText("No valid target")
                 end
             else
                 StatusLabel:SetText("Tycoon not found")
