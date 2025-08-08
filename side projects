@@ -1,4 +1,4 @@
--- v1.9.8 - Teleport button (full parts move), disable collisions, restart-safe CollectZone pulsing after rebirth
+-- v1.9.9 - Teleport buttons, disable collisions, alternating CollectZone, enhanced attribute checks (Premium/RebirthReq anywhere)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -10,7 +10,7 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deivi
 
 local Window = Library:CreateWindow({
     Title = "Auto Tycoon Buttons",
-    Footer = "v1.9.8",
+    Footer = "v1.9.9",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
@@ -37,7 +37,9 @@ local running, busy, rebirthInProgress, didUpgradeThisRebirth = false, false, fa
 local char, hum, hrp
 local sizeLoopActive = false
 
-local function toast(msg) Library:Notify({ Title = "Auto Tycoon", Description = msg, Time = 2 }) end
+local function toast(msg)
+    Library:Notify({ Title = "Auto Tycoon", Description = msg, Time = 2 })
+end
 
 -- === Restart-safe alternating CollectZone size loop ===
 local function alternateCollectZoneSize()
@@ -71,7 +73,7 @@ local function alternateCollectZoneSize()
         end
     end)
 end
-alternateCollectZoneSize() -- start first run
+alternateCollectZoneSize()
 
 -- === Forcefield ignore ===
 local function disableForcefields()
@@ -112,6 +114,35 @@ local function getMana()
     return (pd and pd:FindFirstChild("Mana") and pd.Mana.Value) or 0
 end
 
+-- === Helpers to check attributes anywhere in model or descendants ===
+local function hasAttributeAnywhere(model, attrName)
+    if not model or not attrName then return false end
+    if model:GetAttribute(attrName) ~= nil then
+        return true
+    end
+    for _, desc in ipairs(model:GetDescendants()) do
+        if desc:GetAttribute(attrName) ~= nil then
+            return true
+        end
+    end
+    return false
+end
+
+local function getAttributeAnywhere(model, attrName)
+    if not model or not attrName then return nil end
+    local val = model:GetAttribute(attrName)
+    if val ~= nil then
+        return val
+    end
+    for _, desc in ipairs(model:GetDescendants()) do
+        val = desc:GetAttribute(attrName)
+        if val ~= nil then
+            return val
+        end
+    end
+    return nil
+end
+
 -- === Button logic ===
 local function getButtonPivotPos(inst)
     local model = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
@@ -123,19 +154,41 @@ local function getButtonPivotPos(inst)
 end
 
 local function isValidButton(inst)
-    local name = string.lower(inst.Name)
-    if not name:find("button") then return false, "No 'button' in name" end
+    -- Must have Button_Indicator descendant somewhere
     local model = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
-    if not (model and model:FindFirstChild("Button_Indicator", true)) then return false, "No Button_Indicator" end
+    if not (model and model:FindFirstChild("Button_Indicator", true)) then
+        return false, "No Button_Indicator"
+    end
+
+    -- Must have Premium or RebirthReq attribute anywhere on model or descendants
+    local hasPremium = hasAttributeAnywhere(model, "Premium")
+    local hasRebirthReq = hasAttributeAnywhere(model, "RebirthReq")
+    if not hasPremium and not hasRebirthReq then
+        return false, "No Premium or RebirthReq"
+    end
+
+    -- Check collidable parts
     local hasCollidable = false
     for _, part in ipairs(model:GetDescendants()) do
-        if part:IsA("BasePart") and part.CanCollide then hasCollidable = true break end
+        if part:IsA("BasePart") and part.CanCollide then
+            hasCollidable = true
+            break
+        end
     end
-    if not hasCollidable then return false, "No collidable parts" end
+    if not hasCollidable then
+        return false, "No collidable parts"
+    end
+
+    -- Check mana against UnlockCost attribute
     local cost = inst:GetAttribute("UnlockCost")
-    if type(cost) ~= "number" then return false, nil end
-    if getMana() < cost then return false, "Not enough mana" end
-    -- RebirthReq check active
+    if type(cost) ~= "number" then
+        return false, nil
+    end
+    if getMana() < cost then
+        return false, "Not enough mana"
+    end
+
+    -- Check rebirth requirement if present
     local playerRebirth = 0
     local pd = localPlayer:FindFirstChild("PlayerData")
     if pd then
@@ -144,23 +197,27 @@ local function isValidButton(inst)
             playerRebirth = rebirthValue.Value
         end
     end
-    local rebirthReq = inst:GetAttribute("RebirthReq")
+
+    local rebirthReq = getAttributeAnywhere(model, "RebirthReq")
     if rebirthReq and type(rebirthReq) == "number" and playerRebirth < rebirthReq then
         return false, "Rebirth requirement not met"
     end
+
     local pos = getButtonPivotPos(inst)
-    if not pos then return false, "No position" end
+    if not pos then
+        return false, "No position"
+    end
+
     return true, cost, pos
 end
 
 local function gatherCandidates(root)
     local list = {}
     for _, inst in ipairs(root:GetDescendants()) do
-        if inst.Name:lower():find("button") then
-            local ok, costOrReason, pos = isValidButton(inst)
-            if ok then
-                table.insert(list, { inst = inst, cost = costOrReason, pos = pos })
-            end
+        -- No name check: rely on attribute and indicator only
+        local ok, costOrReason, pos = isValidButton(inst)
+        if ok then
+            table.insert(list, { inst = inst, cost = costOrReason, pos = pos })
         end
     end
     return list
@@ -254,7 +311,7 @@ local function startRebirthSequence()
 
     rebirthInProgress = false
 
-    -- 🔄 restart the CollectZone size alternation
+    -- Restart CollectZone size alternating after rebirth
     alternateCollectZoneSize()
 end
 
