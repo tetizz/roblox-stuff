@@ -6,7 +6,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local Window = Library:CreateWindow({
     Title = "Auto Tycoon Buttons",
-    Footer = "v1.2.0",            -- Updated version here
+    Footer = "v1.3.0",            -- Updated version here
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
@@ -66,6 +66,7 @@ local function toast(txt)
     Library:Notify({ Title = "Auto Tycoon", Description = txt, Time = 2 })
 end
 
+-- Updated getMyTycoon to return player tycoon folder directly (where buttons appear directly)
 local function getMyTycoon()
     local map = workspace:FindFirstChild("Map")
     if not map then return nil end
@@ -76,11 +77,7 @@ local function getMyTycoon()
     local playerTycoonFolder = tycoons:FindFirstChild(localPlayer.Name)
     if not playerTycoonFolder then return nil end
 
-    local tycoonTemplate = playerTycoonFolder:FindFirstChild("TycoonTemplate")
-    if tycoonTemplate and tycoonTemplate:IsA("Model") then
-        return tycoonTemplate
-    end
-    return nil
+    return playerTycoonFolder
 end
 
 local function getMana()
@@ -107,7 +104,6 @@ local function getButtonPivotPos(inst)
     return nil
 end
 
--- isValidButton returns: bool isValid, string reasonOrCostOrNil, Position or nil
 local function isValidButton(inst)
     local name = string.lower(inst.Name)
 
@@ -121,8 +117,7 @@ local function isValidButton(inst)
 
     local cost = inst:GetAttribute("UnlockCost")
     if typeof(cost) ~= "number" then
-        -- Silently skip if UnlockCost missing or invalid
-        return false, nil
+        return false, nil -- silently skip missing cost
     end
 
     if getMana() < cost then
@@ -151,7 +146,6 @@ local function isValidButton(inst)
     return true, cost, pos
 end
 
--- Only gather and validate descendants with "button" in the name
 local function gatherCandidates(root)
     local list = {}
     for _, inst in ipairs(root:GetDescendants()) do
@@ -160,12 +154,9 @@ local function gatherCandidates(root)
             if ok then
                 table.insert(list, { inst = inst, cost = reasonOrCost, pos = pos })
             elseif reasonOrCost then
-                -- Only print if reason provided (skip silent ignores like missing UnlockCost)
                 print("Ignoring button '" .. inst.Name .. "': " .. reasonOrCost)
             end
-            -- Silent if reasonOrCost is nil
         end
-        -- No processing or prints for non-buttons
     end
     return list
 end
@@ -242,13 +233,9 @@ end
 
 local function connectPressOnce(modelOrPart)
     local model = modelOrPart:IsA("Model") and modelOrPart or modelOrPart:FindFirstAncestorWhichIsA("Model")
-    if not model then
-        return
-    end
+    if not model then return end
     local prompt = model:FindFirstChildOfClass("ProximityPrompt") or modelOrPart:FindFirstChildOfClass("ProximityPrompt")
-    if not prompt then
-        return
-    end
+    if not prompt then return end
     local conn
     conn = prompt.Triggered:Connect(function(p)
         if p == localPlayer then
@@ -262,14 +249,10 @@ end
 
 local function getButtonProgressRatio()
     local bp = localPlayer:FindFirstChild("ButtonProgress")
-    if not bp then
-        return nil, nil, nil
-    end
+    if not bp then return nil, nil, nil end
     local unlocked = bp:FindFirstChild("UnlockedButtons")
     local total = bp:FindFirstChild("TotalButtons")
-    if not unlocked or not total then
-        return nil, nil, nil
-    end
+    if not unlocked or not total then return nil, nil, nil end
     local unlockedVal = unlocked.Value
     local totalVal = total.Value
     if type(unlockedVal) ~= "number" or type(totalVal) ~= "number" or totalVal <= 0 then
