@@ -6,7 +6,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local Window = Library:CreateWindow({
     Title = "Auto Tycoon Buttons",
-    Footer = "v1.3.0",            -- Updated version here
+    Footer = "v1.4.0",            -- Updated version
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
@@ -66,7 +66,6 @@ local function toast(txt)
     Library:Notify({ Title = "Auto Tycoon", Description = txt, Time = 2 })
 end
 
--- Updated getMyTycoon to return player tycoon folder directly (where buttons appear directly)
 local function getMyTycoon()
     local map = workspace:FindFirstChild("Map")
     if not map then return nil end
@@ -210,6 +209,7 @@ local function pickTargetBySelection(cands)
     end
 end
 
+-- Move with pathfinding, confirm arrival if within 1 stud threshold
 local function moveExactlyTo(pos)
     if not hrp or not hum then
         return false
@@ -227,24 +227,35 @@ local function moveExactlyTo(pos)
         end
     end
     hum:MoveTo(pos)
-    hum.MoveToFinished:Wait(3)
-    return true
+    local arrivalTime = os.clock()
+    local maxWait = 5
+    while (os.clock() - arrivalTime) < maxWait do
+        if (hrp.Position - pos).Magnitude <= 1 then -- 1 stud threshold
+            return true
+        end
+        task.wait(0.05)
+    end
+    return (hrp.Position - pos).Magnitude <= 1
 end
 
-local function connectPressOnce(modelOrPart)
+-- Auto trigger proximity prompt when nearby
+local function autoTriggerPrompt(modelOrPart)
     local model = modelOrPart:IsA("Model") and modelOrPart or modelOrPart:FindFirstAncestorWhichIsA("Model")
     if not model then return end
     local prompt = model:FindFirstChildOfClass("ProximityPrompt") or modelOrPart:FindFirstChildOfClass("ProximityPrompt")
     if not prompt then return end
-    local conn
-    conn = prompt.Triggered:Connect(function(p)
-        if p == localPlayer then
-            toast("Pressed target: " .. (modelOrPart.Name))
-            if conn then
-                conn:Disconnect()
-            end
+
+    local startTime = os.clock()
+    local maxWait = 5
+    while (os.clock() - startTime) < maxWait do
+        if prompt.Enabled and hrp and (hrp.Position - prompt.Parent.Position).Magnitude <= prompt.MaxActivationDistance then
+            prompt:InputHoldBegin()
+            task.wait(prompt.HoldDuration + 0.1)
+            prompt:InputHoldEnd()
+            break
         end
-    end)
+        task.wait(0.1)
+    end
 end
 
 local function getButtonProgressRatio()
@@ -289,9 +300,13 @@ task.spawn(function()
                 StatusLabel:SetText("Target: " .. target.inst.Name)
                 toast("Valid target found: " .. target.inst.Name)
                 toast("Pathfinding to valid target: " .. target.inst.Name)
-                connectPressOnce(target.inst)
                 local ok = moveExactlyTo(target.pos)
-                StatusLabel:SetText("Arrived: " .. target.inst.Name)
+                if ok then
+                    autoTriggerPrompt(target.inst)
+                    StatusLabel:SetText("Arrived: " .. target.inst.Name)
+                else
+                    StatusLabel:SetText("Failed to reach: " .. target.inst.Name)
+                end
             else
                 StatusLabel:SetText("No valid target (check console for reasons)")
             end
