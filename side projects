@@ -1,12 +1,14 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local localPlayer = Players.LocalPlayer
 local PathfindingService = game:GetService("PathfindingService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
+local Workspace = game:GetService("Workspace")
 
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local Window = Library:CreateWindow({
     Title = "Auto Tycoon Buttons",
-    Footer = "v1.7.2",            -- Updated version
+    Footer = "v1.9.0",            -- Updated version
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
@@ -18,7 +20,7 @@ local InfoBox = MainTab:AddRightGroupbox("Status", "info")
 
 local StatusLabel = InfoBox:AddLabel("Idle")
 local ManaLabel = InfoBox:AddLabel("Mana: 0")
-local TotalButtonsLabel = InfoBox:AddLabel("Buttons unlocked: N/A") -- Below Mana label
+local TotalButtonsLabel = InfoBox:AddLabel("Buttons unlocked: N/A")
 
 local AutoToggle = LeftGroupbox:AddToggle("AutoPathButtons", {
     Text = "Auto path to buttons",
@@ -30,17 +32,7 @@ local TargetSelectDropdown = LeftGroupbox:AddDropdown("TargetSelection", {
     Text = "Target Selection",
     Default = "Closest",
     Values = { "Closest", "Cheapest", "Most Expensive" },
-    Multi = false,
-    Tooltip = "Choose how to select the button to path to",
-    Callback = function(value)
-        selectionMode = value
-        print("Target selection mode changed to:", selectionMode)
-        Library:Notify({
-            Title = "Target Selection",
-            Description = "Mode set to " .. selectionMode,
-            Time = 3
-        })
-    end,
+    Multi = false
 })
 
 local ScanIntervalSlider = LeftGroupbox:AddSlider("ScanInterval", {
@@ -49,39 +41,50 @@ local ScanIntervalSlider = LeftGroupbox:AddSlider("ScanInterval", {
     Min = 0,
     Max = 2,
     Rounding = 1,
-    Precision = 1,
-    Tooltip = "How often to scan for valid buttons (0 to 2 seconds, step 0.1)",
-    Callback = function(value)
-        SCAN_INTERVAL = math.clamp(math.floor(value * 10 + 0.5) / 10, 0, 2)
-        print(string.format("Scan interval set to: %.1f seconds", SCAN_INTERVAL))
-        Library:Notify({
-            Title = "Scan Interval",
-            Description = string.format("Set to %.1f seconds", SCAN_INTERVAL),
-            Time = 2
-        })
-    end,
+    Precision = 1
 })
 
 local SCAN_INTERVAL = 0.3
 local AGENT = { AgentRadius = 2, AgentHeight = 5, AgentCanJump = true }
 local WAYPOINT_WAIT_TIME = 3
 local FINAL_ARRIVAL_MAX_WAIT = 2
-local ARRIVAL_THRESHOLD = 0.3 -- threshold in studs for arrival
+local ARRIVAL_THRESHOLD = 0.3
 
-local char, hum, hrp
 local running = false
 local busy = false
+local rebirthInProgress = false
+local didUpgradeThisRebirth = false
 local selectionMode = "Closest"
+local char, hum, hrp
+
+-- =============================
+-- Forcefield Ignore Setup
+-- =============================
+local function disableForcefields()
+    local forcefieldFolder = Workspace.Map.Tycoons.AznDip:FindFirstChild("F2_Forcefield")
+    if forcefieldFolder then
+        for _, obj in ipairs(forcefieldFolder:GetDescendants()) do
+            if obj:IsA("BasePart") and obj.Name:lower():find("forcefield") then
+                obj.CanCollide = false
+                obj.Transparency = 1 -- optional: hide them
+            end
+        end
+    end
+    -- Also scan the whole workspace for rogue parts named "Forcefield"
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Name:lower():find("forcefield") then
+            obj.CanCollide = false
+        end
+    end
+end
+disableForcefields()
 
 local function bindCharacter(c)
     char = c
     hum = c:WaitForChild("Humanoid")
     hrp = c:WaitForChild("HumanoidRootPart")
 end
-
-if localPlayer.Character then
-    bindCharacter(localPlayer.Character)
-end
+if localPlayer.Character then bindCharacter(localPlayer.Character) end
 localPlayer.CharacterAdded:Connect(bindCharacter)
 
 local function toast(txt)
@@ -89,13 +92,11 @@ local function toast(txt)
 end
 
 local function getMyTycoon()
-    local map = workspace:FindFirstChild("Map")
+    local map = Workspace:FindFirstChild("Map")
     if not map then return nil end
     local tycoons = map:FindFirstChild("Tycoons")
     if not tycoons then return nil end
-    local playerTycoonFolder = tycoons:FindFirstChild(localPlayer.Name)
-    if not playerTycoonFolder then return nil end
-    return playerTycoonFolder
+    return tycoons:FindFirstChild(localPlayer.Name)
 end
 
 local function getMana()
@@ -104,240 +105,201 @@ local function getMana()
     return (mana and mana.Value) or 0
 end
 
+-- =============================
+-- Validate Button Criteria
+-- =============================
 local function getButtonPivotPos(inst)
     local model = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if model then
         local btnBase = model:FindFirstChild("Button_Base")
         if btnBase and btnBase:IsA("BasePart") then
-            return btnBase:GetPivot().Position
+            return btnBase.Position
         end
         if model.PrimaryPart then
-            return model.PrimaryPart:GetPivot().Position
+            return model.PrimaryPart.Position
         end
         return model:GetPivot().Position
     elseif inst:IsA("BasePart") then
-        return inst:GetPivot().Position
+        return inst.Position
     end
-    return nil
 end
 
 local function isValidButton(inst)
     local name = string.lower(inst.Name)
     if not string.find(name, "button") then
-        return false, "Name does not contain 'button'"
+        return false, "Missing 'button' in name"
     end
-    if string.find(name, "premium") then
-        return false, "Button is premium"
+    -- must have a Button_Indicator descendant
+    local model = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
+    if not model:FindFirstChild("Button_Indicator", true) then
+        return false, "No Button_Indicator"
     end
+    -- must have collidable part
+    local collidable = false
+    for _, part in ipairs(model:GetDescendants()) do
+        if part:IsA("BasePart") and part.CanCollide then collidable = true break end
+    end
+    if not collidable then
+        return false, "No collidable parts"
+    end
+    -- cost
     local cost = inst:GetAttribute("UnlockCost")
-    if typeof(cost) ~= "number" then
+    if type(cost) ~= "number" then
         return false, nil
     end
     if getMana() < cost then
         return false, "Not enough mana"
     end
-    local playerRebirth = 0
-    local pd = localPlayer:FindFirstChild("PlayerData")
-    if pd then
-        local rebirthValue = pd:FindFirstChild("Rebirth")
-        if rebirthValue and typeof(rebirthValue.Value) == "number" then
-            playerRebirth = rebirthValue.Value
-        end
-    end
-    local rebirthReq = inst:GetAttribute("RebirthReq")
-    if rebirthReq and type(rebirthReq) == "number" and playerRebirth < rebirthReq then
-        return false, "Rebirth requirement not met"
-    end
-    local pos = getButtonPivotPos(inst)
-    if not pos then
-        return false, "Button position could not be determined"
-    end
-    return true, cost, pos
+    return true, cost, getButtonPivotPos(inst)
 end
 
 local function gatherCandidates(root)
     local list = {}
     for _, inst in ipairs(root:GetDescendants()) do
         if string.find(string.lower(inst.Name), "button") then
-            local ok, reasonOrCost, pos = isValidButton(inst)
+            local ok, costOrReason, pos = isValidButton(inst)
             if ok then
-                table.insert(list, { inst = inst, cost = reasonOrCost, pos = pos })
-            elseif reasonOrCost then
-                print("Ignoring button '" .. inst.Name .. "': " .. reasonOrCost)
+                table.insert(list, { inst = inst, cost = costOrReason, pos = pos })
             end
         end
     end
     return list
 end
 
-local function pickTargetBySelection(cands)
-    if #cands == 0 or not hrp then
-        return nil
-    end
-    if selectionMode == "Closest" then
-        local best, bestD
-        for _, c in ipairs(cands) do
-            local dist = (hrp.Position - c.pos).Magnitude
-            if not best or dist < bestD then
-                best = c
-                bestD = dist
-            end
-        end
-        return best
-    elseif selectionMode == "Cheapest" then
-        local best, bestCost = nil, math.huge
-        for _, c in ipairs(cands) do
-            if c.cost < bestCost then
-                bestCost = c.cost
-                best = c
-            end
-        end
-        return best
-    elseif selectionMode == "Most Expensive" then
-        local best, bestCost = nil, -math.huge
-        for _, c in ipairs(cands) do
-            if c.cost > bestCost then
-                bestCost = c.cost
-                best = c
-            end
-        end
-        return best
-    else
-        local best, bestD
-        for _, c in ipairs(cands) do
-            local dist = (hrp.Position - c.pos).Magnitude
-            if not best or dist < bestD then
-                best = c
-                bestD = dist
-            end
-        end
-        return best
-    end
-end
-
+-- =============================
+-- Pathfinding
+-- =============================
 local function moveExactlyTo(pos)
-    if not hrp or not hum then
-        return false
-    end
+    if not hrp or not hum then return false end
+    disableForcefields()
     local path = PathfindingService:CreatePath(AGENT)
-    local success, errMsg = pcall(function()
+    local success, err = pcall(function()
         path:ComputeAsync(hrp.Position, pos)
     end)
-    if not success then
-        warn("Path compute error:", errMsg)
+    if not success or path.Status ~= Enum.PathStatus.Success then
         return false
     end
-    if path.Status ~= Enum.PathStatus.Success then
-        warn("Pathfinding failed: status =", path.Status.Name)
-        return false
-    end
-    local waypoints = path:GetWaypoints()
-    for _, wp in ipairs(waypoints) do
+    for _, wp in ipairs(path:GetWaypoints()) do
         hum:MoveTo(wp.Position)
-        local reached = hum.MoveToFinished:Wait(WAYPOINT_WAIT_TIME)
-        if not reached then
-            warn("Failed to reach waypoint: ", wp.Position)
+        if not hum.MoveToFinished:Wait(WAYPOINT_WAIT_TIME) then
             return false
         end
     end
-
     hum:MoveTo(pos)
     local startTime = os.clock()
-    local arrived = false
-
     while os.clock() - startTime < FINAL_ARRIVAL_MAX_WAIT do
-        local dist = (hrp.Position - pos).Magnitude
-        if dist <= ARRIVAL_THRESHOLD then
-            arrived = true
-            break
+        if (hrp.Position - pos).Magnitude <= ARRIVAL_THRESHOLD then
+            return true
         end
-        if hum.MoveToFinished:Wait(0.1) then
-            arrived = true
-            break
-        end
-        task.wait(0.05)
+        if hum.MoveToFinished:Wait(0.1) then return true end
     end
-
-    if not arrived then
-        local lateArrive = hum.MoveToFinished:Wait(0)
-        if lateArrive then
-            arrived = true
-        end
-    end
-
-    return arrived
+    return false
 end
 
-local function autoTriggerPrompt(modelOrPart)
-    local model = modelOrPart:IsA("Model") and modelOrPart or modelOrPart:FindFirstAncestorWhichIsA("Model")
-    if not model then return end
-    local prompt = model:FindFirstChildOfClass("ProximityPrompt") or modelOrPart:FindFirstChildOfClass("ProximityPrompt")
+local function autoTriggerPrompt(target)
+    local model = target:IsA("Model") and target or target:FindFirstAncestorWhichIsA("Model")
+    local prompt = model and model:FindFirstChildOfClass("ProximityPrompt") or target:FindFirstChildOfClass("ProximityPrompt")
     if not prompt then return end
+    if prompt.Enabled and (hrp.Position - prompt.Parent.Position).Magnitude <= prompt.MaxActivationDistance then
+        prompt:InputHoldBegin()
+        task.wait(prompt.HoldDuration + 0.1)
+        prompt:InputHoldEnd()
+    end
+end
 
-    local startTime = os.clock()
-    local maxWait = 5
-    while (os.clock() - startTime) < maxWait do
-        if prompt.Enabled and hrp and (hrp.Position - prompt.Parent.Position).Magnitude <= prompt.MaxActivationDistance then
-            prompt:InputHoldBegin()
-            task.wait(prompt.HoldDuration + 0.1)
-            prompt:InputHoldEnd()
-            break
+-- =============================
+-- Rebirth Sequence
+-- =============================
+local function startRebirthSequence()
+    if rebirthInProgress then return end
+    rebirthInProgress = true
+    didUpgradeThisRebirth = false
+    toast("Starting rebirth...")
+
+    local repEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
+    repEvents.RebirthCallback:InvokeServer(Players:WaitForChild(localPlayer.Name))
+
+    task.wait(3)
+    if not didUpgradeThisRebirth then
+        local upPoints = localPlayer.PlayerData.UpgradePoints.Value
+        if upPoints > 0 then
+            for _, stat in ipairs({ "Jump", "Speed", "Regen", "Health" }) do
+                repEvents.UpgradeCallback:InvokeServer(stat)
+            end
+            didUpgradeThisRebirth = true
         end
-        task.wait(0.1)
+    end
+    local mastery = localPlayer.PlayerData:FindFirstChild("Mastery")
+    if mastery then
+        local minVal = math.huge
+        local candidates = {}
+        for _, el in ipairs(mastery:GetChildren()) do
+            if type(el.Value) == "number" and el.Value >= 0 then
+                if el.Value < minVal then
+                    candidates = { el.Name }
+                    minVal = el.Value
+                elseif el.Value == minVal then
+                    table.insert(candidates, el.Name)
+                end
+            end
+        end
+        if #candidates > 0 then
+            local choice = candidates[math.random(#candidates)]
+            repEvents.ElementCallback:InvokeServer(choice)
+        end
+    end
+    repEvents.PickCallback:InvokeServer()
+
+    rebirthInProgress = false
+end
+
+-- =============================
+-- Auto Mana Collection
+-- =============================
+local function goCollectMana()
+    local collectZone = Workspace.Map.Tycoons.AznDip:FindFirstChild("T_Collect_Zone")
+    if collectZone and collectZone:IsA("BasePart") then
+        StatusLabel:SetText("Going to collect mana...")
+        moveExactlyTo(collectZone.Position)
+        task.wait(1)
     end
 end
 
-local function getButtonProgressRatio()
-    local bp = localPlayer:FindFirstChild("ButtonProgress")
-    if not bp then return nil, nil, nil end
-    local unlocked = bp:FindFirstChild("UnlockedButtons")
-    local total = bp:FindFirstChild("TotalButtons")
-    if not unlocked or not total then return nil, nil, nil end
-    local unlockedVal = unlocked.Value
-    local totalVal = total.Value
-    if type(unlockedVal) ~= "number" or type(totalVal) ~= "number" or totalVal <= 0 then
-        return nil, nil, nil
-    end
-    return unlockedVal / totalVal, unlockedVal, totalVal
-end
-
+-- =============================
+-- Main Loop
+-- =============================
 task.spawn(function()
     while true do
-        local ratio, unlocked, total = getButtonProgressRatio()
-        if ratio then
-            local percent = string.format("%.2f", ratio * 100)
-            TotalButtonsLabel:SetText(("Buttons unlocked: %d / %d (%s%%)"):format(unlocked, total, percent))
-        else
-            TotalButtonsLabel:SetText("Buttons unlocked: N/A")
+        local bp = localPlayer:FindFirstChild("ButtonProgress")
+        local unlocked = bp and bp:FindFirstChild("UnlockedButtons")
+        local total = bp and bp:FindFirstChild("TotalButtons")
+        if unlocked and total then
+            TotalButtonsLabel:SetText(("Buttons unlocked: %d / %d"):format(unlocked.Value, total.Value))
+            if unlocked.Value >= total.Value and not rebirthInProgress then
+                startRebirthSequence()
+            end
         end
 
         ManaLabel:SetText("Mana: " .. tostring(getMana()))
 
-        if running and not busy and hrp and hum then
+        if running and not busy and not rebirthInProgress then
             busy = true
-            toast("Searching for valid target...")
             local tycoon = getMyTycoon()
-            if not tycoon then
-                StatusLabel:SetText("Tycoon not found")
-                busy = false
-                task.wait(SCAN_INTERVAL)
-                continue
-            end
-            local cands = gatherCandidates(tycoon)
-            local target = pickTargetBySelection(cands)
-            if target then
-                StatusLabel:SetText("Target: " .. target.inst.Name)
-                toast("Valid target found: " .. target.inst.Name)
-                toast("Pathfinding to valid target: " .. target.inst.Name)
-                local ok = moveExactlyTo(target.pos)
-                if ok then
-                    autoTriggerPrompt(target.inst)
-                    StatusLabel:SetText("Arrived: " .. target.inst.Name)
+            if tycoon then
+                local cands = gatherCandidates(tycoon)
+                if #cands > 0 then
+                    local target = cands[1]
+                    StatusLabel:SetText("Target: " .. target.inst.Name)
+                    if moveExactlyTo(target.pos) then
+                        autoTriggerPrompt(target.inst)
+                    end
                 else
-                    StatusLabel:SetText("Failed to reach: " .. target.inst.Name)
+                    -- No candidates — check if it's due to low mana
+                    local autoCollectFlag = localPlayer:FindFirstChild("Gamepasses") and localPlayer.Gamepasses:FindFirstChild("AutoCollect")
+                    if not (autoCollectFlag and autoCollectFlag.Value) then
+                        goCollectMana()
+                    end
                 end
-            else
-                StatusLabel:SetText("No valid target (check console for reasons)")
             end
             busy = false
         end
@@ -345,9 +307,7 @@ task.spawn(function()
     end
 end)
 
-AutoToggle:OnChanged(function(val)
-    running = val
-    StatusLabel:SetText(val and "Enabled" or "Disabled")
-    toast("Auto-path is " .. (val and "ON" or "OFF"))
-    print("AutoPathButtons toggled:", val)
+AutoToggle:OnChanged(function(v)
+    running = v
+    StatusLabel:SetText(v and "Enabled" or "Disabled")
 end)
