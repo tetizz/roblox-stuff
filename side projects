@@ -1,4 +1,4 @@
--- v1.9.9 - Teleport buttons, disable collisions, alternating CollectZone, enhanced attribute checks (Premium/RebirthReq anywhere)
+-- v1.9.10 - Add mastery display in StatusLabel, teleport buttons, disable collisions, alternating CollectZone
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -10,13 +10,13 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deivi
 
 local Window = Library:CreateWindow({
     Title = "Auto Tycoon Buttons",
-    Footer = "v1.9.9",
+    Footer = "v1.9.10",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
 })
 
--- UI
+-- UI setup
 local MainTab = Window:AddTab("Main", "home")
 local LeftGroupbox = MainTab:AddLeftGroupbox("Control", "wrench")
 local InfoBox = MainTab:AddRightGroupbox("Status", "info")
@@ -32,7 +32,7 @@ local ScanIntervalSlider = LeftGroupbox:AddSlider("ScanInterval", { Text = "Scan
 -- Settings
 local SCAN_INTERVAL = 0.3
 
--- State
+-- State variables
 local running, busy, rebirthInProgress, didUpgradeThisRebirth = false, false, false, false
 local char, hum, hrp
 local sizeLoopActive = false
@@ -43,10 +43,8 @@ end
 
 -- === Restart-safe alternating CollectZone size loop ===
 local function alternateCollectZoneSize()
-    -- Stop any existing loop
     sizeLoopActive = false
     task.wait(0.1)
-    -- Start new loop
     sizeLoopActive = true
     task.spawn(function()
         while sizeLoopActive do
@@ -114,16 +112,12 @@ local function getMana()
     return (pd and pd:FindFirstChild("Mana") and pd.Mana.Value) or 0
 end
 
--- === Helpers to check attributes anywhere in model or descendants ===
+-- Helpers to check/get attributes anywhere
 local function hasAttributeAnywhere(model, attrName)
     if not model or not attrName then return false end
-    if model:GetAttribute(attrName) ~= nil then
-        return true
-    end
+    if model:GetAttribute(attrName) ~= nil then return true end
     for _, desc in ipairs(model:GetDescendants()) do
-        if desc:GetAttribute(attrName) ~= nil then
-            return true
-        end
+        if desc:GetAttribute(attrName) ~= nil then return true end
     end
     return false
 end
@@ -131,19 +125,15 @@ end
 local function getAttributeAnywhere(model, attrName)
     if not model or not attrName then return nil end
     local val = model:GetAttribute(attrName)
-    if val ~= nil then
-        return val
-    end
+    if val ~= nil then return val end
     for _, desc in ipairs(model:GetDescendants()) do
         val = desc:GetAttribute(attrName)
-        if val ~= nil then
-            return val
-        end
+        if val ~= nil then return val end
     end
     return nil
 end
 
--- === Button logic ===
+-- Button helper functions
 local function getButtonPivotPos(inst)
     local model = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not model then return nil end
@@ -154,20 +144,19 @@ local function getButtonPivotPos(inst)
 end
 
 local function isValidButton(inst)
-    -- Must have Button_Indicator descendant somewhere
     local model = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
+
     if not (model and model:FindFirstChild("Button_Indicator", true)) then
         return false, "No Button_Indicator"
     end
 
-    -- Must have Premium or RebirthReq attribute anywhere on model or descendants
     local hasPremium = hasAttributeAnywhere(model, "Premium")
     local hasRebirthReq = hasAttributeAnywhere(model, "RebirthReq")
+
     if not hasPremium and not hasRebirthReq then
         return false, "No Premium or RebirthReq"
     end
 
-    -- Check collidable parts
     local hasCollidable = false
     for _, part in ipairs(model:GetDescendants()) do
         if part:IsA("BasePart") and part.CanCollide then
@@ -179,7 +168,6 @@ local function isValidButton(inst)
         return false, "No collidable parts"
     end
 
-    -- Check mana against UnlockCost attribute
     local cost = inst:GetAttribute("UnlockCost")
     if type(cost) ~= "number" then
         return false, nil
@@ -188,7 +176,6 @@ local function isValidButton(inst)
         return false, "Not enough mana"
     end
 
-    -- Check rebirth requirement if present
     local playerRebirth = 0
     local pd = localPlayer:FindFirstChild("PlayerData")
     if pd then
@@ -214,7 +201,6 @@ end
 local function gatherCandidates(root)
     local list = {}
     for _, inst in ipairs(root:GetDescendants()) do
-        -- No name check: rely on attribute and indicator only
         local ok, costOrReason, pos = isValidButton(inst)
         if ok then
             table.insert(list, { inst = inst, cost = costOrReason, pos = pos })
@@ -223,9 +209,10 @@ local function gatherCandidates(root)
     return list
 end
 
--- === Teleport button to player ===
+-- Teleport button to player (move all BaseParts)
 local function bringButtonToPlayer(buttonInstance)
     if not hrp then return end
+
     local buttonModel = buttonInstance:IsA("Model") and buttonInstance or buttonInstance:FindFirstAncestorWhichIsA("Model")
     local targetCFrame = hrp.CFrame * CFrame.new(0, 0, -2)
 
@@ -234,6 +221,7 @@ local function bringButtonToPlayer(buttonInstance)
             local primary = buttonModel:FindFirstChildWhichIsA("BasePart")
             if primary then buttonModel.PrimaryPart = primary end
         end
+
         if buttonModel.PrimaryPart then
             local offset = targetCFrame.Position - buttonModel.PrimaryPart.Position
             for _, part in ipairs(buttonModel:GetDescendants()) do
@@ -259,7 +247,7 @@ local function bringButtonToPlayer(buttonInstance)
     end
 end
 
--- === Prompt trigger ===
+-- Trigger proximity prompt
 local function autoTriggerPrompt(target)
     local model = target:IsA("Model") and target or target:FindFirstAncestorWhichIsA("Model")
     local prompt = model and model:FindFirstChildOfClass("ProximityPrompt") or target:FindFirstChildOfClass("ProximityPrompt")
@@ -270,7 +258,28 @@ local function autoTriggerPrompt(target)
     end
 end
 
--- === Rebirth sequence ===
+-- Function to get mastery status string for StatusLabel
+local function getMasteryStatus()
+    local pd = localPlayer:FindFirstChild("PlayerData")
+    if not pd then return "No PlayerData" end
+    local mastery = pd:FindFirstChild("Mastery")
+    if not mastery then return "No Mastery" end
+
+    local parts = {}
+    for _, child in ipairs(mastery:GetChildren()) do
+        if child:IsA("NumberValue") or child:IsA("IntValue") then
+            table.insert(parts, string.format("%s: %d", child.Name, child.Value))
+        elseif child:IsA("StringValue") then
+            table.insert(parts, string.format("%s: %s", child.Name, child.Value))
+        else
+            table.insert(parts, string.format("%s: %s", child.Name, tostring(child.Value)))
+        end
+    end
+
+    return table.concat(parts, " | ")
+end
+
+-- Rebirth process with upgrades and mastery element pick
 local function startRebirthSequence()
     rebirthInProgress = true
     didUpgradeThisRebirth = false
@@ -283,7 +292,7 @@ local function startRebirthSequence()
     if not didUpgradeThisRebirth then
         local upPoints = localPlayer.PlayerData.UpgradePoints.Value
         if upPoints > 0 then
-            for _, stat in ipairs({ "Jump","Speed","Regen","Health" }) do
+            for _, stat in ipairs({ "Jump", "Speed", "Regen", "Health" }) do
                 repEvents.UpgradeCallback:InvokeServer(stat)
             end
             didUpgradeThisRebirth = true
@@ -332,6 +341,9 @@ task.spawn(function()
 
         ManaLabel:SetText("Mana: " .. tostring(getMana()))
 
+        -- Update mastery status in StatusLabel every cycle
+        StatusLabel:SetText(getMasteryStatus())
+
         if running and not busy and not rebirthInProgress then
             busy = true
             local tycoon = getMyTycoon()
@@ -345,13 +357,15 @@ task.spawn(function()
                     autoTriggerPrompt(target.inst)
                     StatusLabel:SetText("Activated: " .. target.inst.Name)
                 else
-                    StatusLabel:SetText("No valid target")
+                    -- If no targets, show mastery status instead to avoid flicker
+                    StatusLabel:SetText(getMasteryStatus())
                 end
             else
                 StatusLabel:SetText("Tycoon not found")
             end
             busy = false
         end
+
         task.wait(SCAN_INTERVAL)
     end
 end)
