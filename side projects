@@ -43,7 +43,7 @@ local TargetSelectDropdown = LeftGroupbox:AddDropdown("TargetSelection", {
     end,
 })
 
-local SCAN_INTERVAL = 1.25
+local SCAN_INTERVAL = 0.5
 local AGENT = { AgentRadius = 2, AgentHeight = 5, AgentCanJump = true }
 
 local char, hum, hrp
