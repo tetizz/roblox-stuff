@@ -1,4 +1,4 @@
--- v1.9.16 - Debris Crystal/Manana teleport, mastery in own box, v1.9.10 teleport, fixed mana, spell stand bring
+-- v1.9.16 - Mastery always in stats box, never status; crystal/manana debris teleport, v1.9.10 teleport
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -305,7 +305,7 @@ local function doRebirth()
     masteryPauseUntil = tick() + 10
 end
 
--- Spell stand bring logic example path (adjust as needed)
+-- Weapon bring logic (example path)
 local spellStandPath = {"Map", "Tycoons", "dark776389", "F1_SpellStand_1"}
 
 local baseState, baseOrigCFrame = {}, {}
@@ -412,10 +412,11 @@ local function autoGetWeapon()
         return
     end
 
-    StatusLbl:SetText(getMasteryStr())
+    -- FIXED: mastery display never in StatusLbl!
+    -- MasteryLbl:SetText(getMasteryStr())
 end
 
--- Debris part teleport helper
+-- Debris part teleport helper (includes Purple/Blue Crystal)
 local function teleportDebrisParts()
     local debris = Workspace:FindFirstChild("Debris")
     if not debris then return end
@@ -428,6 +429,20 @@ local function teleportDebrisParts()
         end
     end
 end
+
+-- Mastery stats update task
+task.spawn(function()
+    MasteryLbl:SetText(getMasteryStr()) -- immediate
+    while true do
+        if tick() >= masteryPauseUntil then
+            local s, e = pcall(function()
+                MasteryLbl:SetText(getMasteryStr())
+            end)
+            if not s then warn("Mastery update error:", e) end
+        end
+        task.wait(3)
+    end
+end)
 
 -- Main loop
 task.spawn(function()
@@ -446,11 +461,6 @@ task.spawn(function()
 
         ManaLbl:SetText("Mana: " .. tostring(getMana()))
 
-        if not busy then
-            -- Mastery updates handled separately
-        end
-
-        -- Teleport Debris parts if present
         teleportDebrisParts()
 
         if running and not busy and not rebirthing then
@@ -466,7 +476,7 @@ task.spawn(function()
                     triggerPrompt(targ.inst)
                     StatusLbl:SetText("Activated: " .. targ.inst.Name)
                 else
-                    StatusLbl:SetText(getMasteryStr())
+                    MasteryLbl:SetText(getMasteryStr()) -- FIXED: mastery only in mastery box
                 end
             else
                 StatusLbl:SetText("Tycoon not found")
@@ -484,7 +494,6 @@ task.spawn(function()
     end
 end)
 
--- Toggles handlers
 TogAutoBtn:OnChanged(function(v)
     running = v
     StatusLbl:SetText(v and "Enabled Auto Path" or "Disabled Auto Path")
