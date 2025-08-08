@@ -6,7 +6,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local Window = Library:CreateWindow({
     Title = "Auto Tycoon Buttons",
-    Footer = "v1.0.0",
+    Footer = "v1.1.0",            -- Updated version here
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
@@ -107,7 +107,7 @@ local function getButtonPivotPos(inst)
     return nil
 end
 
--- Updated isValidButton to return reason why invalid
+-- isValidButton returns true/false, reason or cost, pos
 local function isValidButton(inst)
     local name = string.lower(inst.Name)
 
@@ -150,7 +150,7 @@ local function isValidButton(inst)
     return true, cost, pos
 end
 
--- Only checks descendants whose name contains "button" before isValidButton call
+-- Only gather and evaluate descendants whose name contains "button"
 local function gatherCandidates(root)
     local list = {}
     for _, inst in ipairs(root:GetDescendants()) do
@@ -162,6 +162,7 @@ local function gatherCandidates(root)
                 print("Ignoring button '" .. inst.Name .. "': " .. (reasonOrCost or "Unknown reason"))
             end
         end
+        -- No print for non-button descendants
     end
     return list
 end
@@ -177,10 +178,10 @@ local function pickTargetBySelection(cands)
     if selectionMode == "Closest" then
         local best, bestD
         for _, c in ipairs(cands) do
-            local d = (hrp.Position - c.pos).Magnitude
-            if not best or d < bestD then
+            local dist = (hrp.Position - c.pos).Magnitude
+            if not best or dist < bestD then
                 best = c
-                bestD = d
+                bestD = dist
             end
         end
         return best
@@ -205,10 +206,10 @@ local function pickTargetBySelection(cands)
     else
         local best, bestD
         for _, c in ipairs(cands) do
-            local d = (hrp.Position - c.pos).Magnitude
-            if not best or d < bestD then
+            local dist = (hrp.Position - c.pos).Magnitude
+            if not best or dist < bestD then
                 best = c
-                bestD = d
+                bestD = dist
             end
         end
         return best
@@ -320,3 +321,4 @@ AutoToggle:OnChanged(function(val)
     toast("Auto-path is " .. (val and "ON" or "OFF"))
     print("AutoPathButtons toggled:", val)
 end)
+
