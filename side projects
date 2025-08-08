@@ -1,4 +1,4 @@
--- v1.9.17 - Debris pickup at/above/below player, mastery only in stats, upgraded reliability, all features
+-- v1.9.18 - Mastery display fully dynamic (auto-expand lines), instant debris pickup, all features
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,7 +9,7 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deivi
 
 local Win = Library:CreateWindow({
     Title = "Auto Tycoon Bot",
-    Footer = "v1.9.17",
+    Footer = "v1.9.18",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
@@ -26,13 +26,8 @@ StatusLbl.TextWrapped = true
 StatusLbl.TextTruncate = Enum.TextTruncate.None
 
 local StatsBox = TabMain:AddRightGroupbox("Stats", "clipboard-list")
-local MasteryLbl = StatsBox:AddLabel("Mastery will appear here")
-MasteryLbl.TextYAlignment = Enum.TextYAlignment.Top
-MasteryLbl.TextWrapped = true
-MasteryLbl.TextTruncate = Enum.TextTruncate.None
-pcall(function()
-    MasteryLbl:SetSize(Vector2.new(260, 280))
-end)
+-- Dynamic mastery labels will populate this box
+local masteryLbls = {}
 
 local ManaLbl = StatusBox:AddLabel("Mana: 0")
 local ButtonsLbl = StatusBox:AddLabel("Buttons unlocked: N/A")
@@ -411,7 +406,7 @@ local function autoGetWeapon()
     end
 end
 
--- Debris teleport to player (at, above, and below, instant)
+-- Debris pickup at/above/below player, instant
 local function teleportDebrisParts()
     local debris = Workspace:FindFirstChild("Debris")
     if not debris or not hrp then return end
@@ -428,13 +423,29 @@ local function teleportDebrisParts()
     end
 end
 
--- Mastery stats update task
+-- --- DYNAMIC MASTERY LABELS ---
+local function updateMasteryLabels(masteryStr)
+    -- Remove old labels
+    for _, lbl in ipairs(masteryLbls) do
+        pcall(function() lbl:Remove() end)
+    end
+    masteryLbls = {}
+
+    for line in masteryStr:gmatch("[^\n]+") do
+        local lbl = StatsBox:AddLabel(line)
+        lbl.TextYAlignment = Enum.TextYAlignment.Top
+        lbl.TextWrapped = true
+        lbl.TextTruncate = Enum.TextTruncate.None
+        table.insert(masteryLbls, lbl)
+    end
+end
+
 task.spawn(function()
-    MasteryLbl:SetText(getMasteryStr())
+    updateMasteryLabels(getMasteryStr())
     while true do
         if tick() >= masteryPauseUntil then
             local s, e = pcall(function()
-                MasteryLbl:SetText(getMasteryStr())
+                updateMasteryLabels(getMasteryStr())
             end)
             if not s then warn("Mastery update error:", e) end
         end
@@ -473,7 +484,7 @@ task.spawn(function()
                     triggerPrompt(targ.inst)
                     StatusLbl:SetText("Activated: " .. targ.inst.Name)
                 else
-                    MasteryLbl:SetText(getMasteryStr()) -- Mastery only in stats box
+                    updateMasteryLabels(getMasteryStr())
                 end
             else
                 StatusLbl:SetText("Tycoon not found")
