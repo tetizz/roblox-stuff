@@ -18,7 +18,7 @@ local InfoBox = MainTab:AddRightGroupbox("Status", "info")
 
 local StatusLabel = InfoBox:AddLabel("Idle")
 local ManaLabel = InfoBox:AddLabel("Mana: 0")
-local TotalButtonsLabel = InfoBox:AddLabel("Buttons unlocked: N/A") -- Moved below Mana label
+local TotalButtonsLabel = InfoBox:AddLabel("Buttons unlocked: N/A") -- Below ManaLabel
 
 local AutoToggle = LeftGroupbox:AddToggle("AutoPathButtons", {
     Text = "Auto path to buttons",
@@ -62,7 +62,7 @@ local function toast(txt)
     Library:Notify({ Title = "Auto Tycoon", Description = txt, Time = 2 })
 end
 
--- Dynamic getMyTycoon for any player, fetching TycoonTemplate under player's folder
+-- Dynamic getMyTycoon for any player
 local function getMyTycoon()
     local map = workspace:FindFirstChild("Map")
     if not map then return nil end
@@ -110,12 +110,32 @@ local function isValidButton(inst)
     local name = string.lower(inst.Name)
     if not string.find(name, "button") then return false end
     if string.find(name, "premium") then return false end
+    
     local cost = inst:GetAttribute("UnlockCost")
     if typeof(cost) ~= "number" then return false end
     if getMana() < cost then return false end
+
+    -- Get player's rebirth value safely from PlayerData
+    local playerRebirth = 0
+    local pd = localPlayer:FindFirstChild("PlayerData")
+    if pd then
+        local rebirthValue = pd:FindFirstChild("Rebirth")
+        if rebirthValue and typeof(rebirthValue.Value) == "number" then
+            playerRebirth = rebirthValue.Value
+        end
+    end
+
+    -- Check button-specific RebirthReq attribute
+    local rebirthReq = inst:GetAttribute("RebirthReq")
+    if rebirthReq and type(rebirthReq) == "number" then
+        if playerRebirth < rebirthReq then
+            return false
+        end
+    end
+
     local pos = getButtonPivotPos(inst)
     if not pos then return false end
-    -- Removed max range check as requested
+
     return true, cost, pos
 end
 
