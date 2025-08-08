@@ -6,7 +6,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local Window = Library:CreateWindow({
     Title = "Auto Tycoon Buttons",
-    Footer = "v1.5.0",            -- Updated version
+    Footer = "v1.6.0",            -- Updated version
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
@@ -43,7 +43,26 @@ local TargetSelectDropdown = LeftGroupbox:AddDropdown("TargetSelection", {
     end,
 })
 
-local SCAN_INTERVAL = 0.5
+local ScanIntervalSlider = LeftGroupbox:AddSlider("ScanInterval", {
+    Text = "Scan Interval (seconds)",
+    Default = 0.5,
+    Min = 0,
+    Max = 2,
+    Rounding = 1,        -- to allow 0.1 steps due to UI lib behavior
+    Precision = 1,       -- for display formatting
+    Tooltip = "How often to scan for valid buttons (0 to 2 seconds, step 0.1)",
+    Callback = function(value)
+        SCAN_INTERVAL = math.clamp(math.floor(value * 10 + 0.5) / 10, 0, 2) -- round to 0.1
+        print(string.format("Scan interval set to: %.1f seconds", SCAN_INTERVAL))
+        Library:Notify({
+            Title = "Scan Interval",
+            Description = string.format("Set to %.1f seconds", SCAN_INTERVAL),
+            Time = 2
+        })
+    end,
+})
+
+local SCAN_INTERVAL = 0.5  -- start with 0.5 seconds
 local AGENT = { AgentRadius = 2, AgentHeight = 5, AgentCanJump = true }
 
 local char, hum, hrp
