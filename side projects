@@ -1,3 +1,5 @@
+-- v1.9.3 - Removed walking/jumping to collection zone since CollectZone size covers all
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -9,7 +11,7 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deivi
 
 local Window = Library:CreateWindow({
     Title = "Auto Tycoon Buttons",
-    Footer = "v1.9.1",
+    Footer = "v1.9.3",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
@@ -24,26 +26,9 @@ local StatusLabel = InfoBox:AddLabel("Idle")
 local ManaLabel = InfoBox:AddLabel("Mana: 0")
 local TotalButtonsLabel = InfoBox:AddLabel("Buttons unlocked: N/A")
 
-local AutoToggle = LeftGroupbox:AddToggle("AutoPathButtons", {
-    Text = "Auto path to buttons",
-    Default = false
-})
-
-local TargetSelectDropdown = LeftGroupbox:AddDropdown("TargetSelection", {
-    Text = "Target Selection",
-    Default = "Closest",
-    Values = { "Closest", "Cheapest", "Most Expensive" },
-    Multi = false,
-    Callback = function(v) selectionMode = v end
-})
-
-local ScanIntervalSlider = LeftGroupbox:AddSlider("ScanInterval", {
-    Text = "Scan Interval (seconds)",
-    Default = 0.3, Min = 0, Max = 2, Rounding = 1, Precision = 1,
-    Callback = function(value)
-        SCAN_INTERVAL = math.clamp(math.floor(value * 10 + 0.5) / 10, 0, 2)
-    end
-})
+local AutoToggle = LeftGroupbox:AddToggle("AutoPathButtons", { Text = "Auto path to buttons", Default = false })
+local TargetSelectDropdown = LeftGroupbox:AddDropdown("TargetSelection", { Text = "Target Selection", Default = "Closest", Values = { "Closest", "Cheapest", "Most Expensive" }, Multi = false })
+local ScanIntervalSlider = LeftGroupbox:AddSlider("ScanInterval", { Text = "Scan Interval (seconds)", Default = 0.3, Min = 0, Max = 2, Rounding = 1, Precision = 1 })
 
 -- Settings
 local SCAN_INTERVAL = 0.3
@@ -54,14 +39,11 @@ local WAYPOINT_WAIT_TIME, FINAL_ARRIVAL_MAX_WAIT, ARRIVAL_THRESHOLD = 3, 2, 0.3
 local running, busy, rebirthInProgress, didUpgradeThisRebirth = false, false, false, false
 local selectionMode, char, hum, hrp = "Closest"
 
--- Utils
-local function toast(msg)
-    Library:Notify({ Title = "Auto Tycoon", Description = msg, Time = 2 })
-end
+local function toast(msg) Library:Notify({ Title = "Auto Tycoon", Description = msg, Time = 2 }) end
 
+-- Forcefield ignore
 local function disableForcefields()
-    -- Player's tycoon Forcefield folder
-    local myTycoon = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Tycoons") and Workspace.Map.Tycoons:FindFirstChild(localPlayer.Name)
+    local myTycoon = Workspace.Map.Tycoons:FindFirstChild(localPlayer.Name)
     if myTycoon then
         local ffFolder = myTycoon:FindFirstChild("F2_Forcefield")
         if ffFolder then
@@ -73,7 +55,6 @@ local function disableForcefields()
             end
         end
     end
-    -- Globally ignore forcefields
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") and obj.Name:lower():find("forcefield") then
             obj.CanCollide = false
@@ -81,6 +62,7 @@ local function disableForcefields()
     end
 end
 
+-- Character
 local function bindCharacter(c)
     char = c
     hum = c:WaitForChild("Humanoid")
@@ -90,11 +72,8 @@ if localPlayer.Character then bindCharacter(localPlayer.Character) end
 localPlayer.CharacterAdded:Connect(bindCharacter)
 
 local function getMyTycoon()
-    local map = Workspace:FindFirstChild("Map")
-    if not map then return nil end
-    local tycoons = map:FindFirstChild("Tycoons")
-    if not tycoons then return nil end
-    return tycoons:FindFirstChild(localPlayer.Name)
+    local tycoons = Workspace.Map:FindFirstChild("Tycoons")
+    return tycoons and tycoons:FindFirstChild(localPlayer.Name)
 end
 
 local function getMana()
@@ -127,6 +106,17 @@ local function isValidButton(inst)
     local cost = inst:GetAttribute("UnlockCost")
     if type(cost) ~= "number" then return false, nil end
     if getMana() < cost then return false, "Not enough mana" end
+    -- Active RebirthReq
+    local playerRebirth = 0
+    local pd = localPlayer:FindFirstChild("PlayerData")
+    if pd then
+        local rebirthValue = pd:FindFirstChild("Rebirth")
+        if rebirthValue and typeof(rebirthValue.Value) == "number" then playerRebirth = rebirthValue.Value end
+    end
+    local rebirthReq = inst:GetAttribute("RebirthReq")
+    if rebirthReq and type(rebirthReq) == "number" and playerRebirth < rebirthReq then
+        return false, "Rebirth requirement not met"
+    end
     local pos = getButtonPivotPos(inst)
     if not pos then return false, "No position" end
     return true, cost, pos
@@ -213,19 +203,6 @@ local function startRebirthSequence()
     rebirthInProgress = false
 end
 
--- Mana collection
-local function goCollectMana()
-    local myTycoon = getMyTycoon()
-    if myTycoon then
-        local collectZone = myTycoon:FindFirstChild("T_Collect_Zone")
-        if collectZone and collectZone:IsA("BasePart") then
-            StatusLabel:SetText("Collecting mana...")
-            moveExactlyTo(collectZone.Position)
-            task.wait(1)
-        end
-    end
-end
-
 -- Main loop
 task.spawn(function()
     while true do
@@ -250,11 +227,6 @@ task.spawn(function()
                     local target = cands[1]
                     if moveExactlyTo(target.pos) then
                         autoTriggerPrompt(target.inst)
-                    end
-                else
-                    local autoCollectFlag = localPlayer:FindFirstChild("Gamepasses") and localPlayer.Gamepasses:FindFirstChild("AutoCollect")
-                    if not (autoCollectFlag and autoCollectFlag.Value) then
-                        goCollectMana()
                     end
                 end
             end
