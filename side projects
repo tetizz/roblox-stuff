@@ -1,4 +1,4 @@
--- v1.9.15 with v1.9.10 teleport logic for buttons and weapon stands, mastery in separate box, proper mana loading
+-- v1.9.16 - Debris Crystal/Manana teleport, mastery in own box, v1.9.10 teleport, fixed mana, spell stand bring
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,7 +9,7 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deivi
 
 local Win = Library:CreateWindow({
     Title = "Auto Tycoon Bot",
-    Footer = "v1.9.15",
+    Footer = "v1.9.16",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
@@ -51,7 +51,6 @@ local SliderScan = LeftBox:AddSlider("ScanInt", {
     Precision = 1,
 })
 
--- Settings & state vars
 local SCAN_INT = 0.3
 local running, busy, rebirthing, didUpg = false, false, false, false
 local autoWpnRunning = false
@@ -62,12 +61,10 @@ local masteryPauseUntil = 0
 -- Async refs for PlayerData and Mana
 local PlayerData, ManaVal
 
--- Notify
 local function notify(msg)
     Library:Notify({Title = "Auto Tycoon", Description = msg, Time = 2})
 end
 
--- Wait PlayerData & Mana loading
 task.spawn(function()
     repeat
         PlayerData = plr:FindFirstChild("PlayerData")
@@ -83,7 +80,6 @@ local function getMana()
     return (ManaVal and ManaVal.Value) or 0
 end
 
--- Bind character
 local function bindChar(c)
     char = c
     hum = c:WaitForChild("Humanoid")
@@ -92,7 +88,6 @@ end
 if plr.Character then bindChar(plr.Character) end
 plr.CharacterAdded:Connect(bindChar)
 
--- Restart-safe CollectZone pulsing
 local function altCollectZone()
     sizeLoopActive = false
     task.wait(0.1)
@@ -124,9 +119,7 @@ local function altCollectZone()
 end
 altCollectZone()
 
--- Forcefield ignore, etc. omitted for brevity (same as prior)
-
--- Helpers for attributes presence anywhere
+-- Attribute helpers
 local function attrAnywhere(m, key)
     if not m or not key then return false end
     if m:GetAttribute(key) ~= nil then return true end
@@ -147,7 +140,7 @@ local function getAttrAnywhere(m, key)
     return nil
 end
 
--- Button helpers
+-- Button logic
 local function getBtnPos(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not m then return nil end
@@ -201,7 +194,7 @@ local function gatherCands(root)
     return res
 end
 
--- Teleport buttons (v1.9.10 teleport logic): move all BaseParts relative to HRP once
+-- Teleport buttons or models (v1.9.10 style)
 local function bringBtn(inst)
     if not hrp then return end
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
@@ -233,7 +226,13 @@ local function bringBtn(inst)
     end
 end
 
--- Trigger ProximityPrompt on target
+local function bringPartToPlayer(part)
+    if not hrp or not part then return end
+    part.CanCollide = false
+    part.Massless = true
+    part.CFrame = hrp.CFrame * CFrame.new(0, 0, -2)
+end
+
 local function triggerPrompt(tgt)
     local m = tgt:IsA("Model") and tgt or tgt:FindFirstAncestorWhichIsA("Model")
     local prompt = m and m:FindFirstChildOfClass("ProximityPrompt") or tgt:FindFirstChildOfClass("ProximityPrompt")
@@ -244,7 +243,6 @@ local function triggerPrompt(tgt)
     end
 end
 
--- Mastery string
 local function getMasteryStr()
     if not PlayerData then return "No PlayerData" end
     local mastery = PlayerData:FindFirstChild("Mastery")
@@ -263,7 +261,6 @@ local function getMasteryStr()
     return table.concat(t, "\n")
 end
 
--- Rebirth sequence
 local function doRebirth()
     rebirthing = true
     didUpg = false
@@ -308,11 +305,10 @@ local function doRebirth()
     masteryPauseUntil = tick() + 10
 end
 
--- Auto get weapon stand handling (model bring logic also uses v1.9.10 style teleport)
+-- Spell stand bring logic example path (adjust as needed)
 local spellStandPath = {"Map", "Tycoons", "dark776389", "F1_SpellStand_1"}
 
-local baseState = {} -- key=model, states: "idle", "teleported", "returned"
-local baseOrigCFrame = {}
+local baseState, baseOrigCFrame = {}, {}
 
 local function findSpellStandModel()
     local obj = Workspace
@@ -405,7 +401,6 @@ local function autoGetWeapon()
         baseOrigCFrame[model] = model:GetPivot()
         bringModelToPlayer(model)
         baseState[model] = "teleported"
-
         for _, p in ipairs(prompts) do
             if hrp and (hrp.Position - p.Parent.Position).Magnitude <= p.MaxActivationDistance and p.Enabled then
                 p:InputHoldBegin()
@@ -413,7 +408,6 @@ local function autoGetWeapon()
                 p:InputHoldEnd()
             end
         end
-
         StatusLbl:SetText("Getting weapon: " .. weaponName)
         return
     end
@@ -421,19 +415,19 @@ local function autoGetWeapon()
     StatusLbl:SetText(getMasteryStr())
 end
 
--- Mastery update task
-task.spawn(function()
-    MasteryLbl:SetText(getMasteryStr()) -- immediate
-    while true do
-        if tick() >= masteryPauseUntil then
-            local success, err = pcall(function()
-                MasteryLbl:SetText(getMasteryStr())
-            end)
-            if not success then warn("Mastery update error:", err) end
+-- Debris part teleport helper
+local function teleportDebrisParts()
+    local debris = Workspace:FindFirstChild("Debris")
+    if not debris then return end
+    for _, name in ipairs({"Premium_Manana", "Manana", "Purple_Crystal", "Blue_Crystal"}) do
+        local part = debris:FindFirstChild(name)
+        if part and part:IsA("BasePart") and hrp then
+            part.CanCollide = false
+            part.Massless = true
+            part.CFrame = hrp.CFrame * CFrame.new(0, 0, -2)
         end
-        task.wait(3)
     end
-end)
+end
 
 -- Main loop
 task.spawn(function()
@@ -455,6 +449,9 @@ task.spawn(function()
         if not busy then
             -- Mastery updates handled separately
         end
+
+        -- Teleport Debris parts if present
+        teleportDebrisParts()
 
         if running and not busy and not rebirthing then
             busy = true
