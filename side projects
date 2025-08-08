@@ -6,7 +6,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local Window = Library:CreateWindow({
     Title = "Auto Tycoon Buttons",
-    Footer = "v1.6.0",            -- Updated version
+    Footer = "v1.7.1",            -- Updated version
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
@@ -45,14 +45,14 @@ local TargetSelectDropdown = LeftGroupbox:AddDropdown("TargetSelection", {
 
 local ScanIntervalSlider = LeftGroupbox:AddSlider("ScanInterval", {
     Text = "Scan Interval (seconds)",
-    Default = 0.5,
+    Default = 0.3,
     Min = 0,
     Max = 2,
-    Rounding = 1,        -- to allow 0.1 steps due to UI lib behavior
-    Precision = 1,       -- for display formatting
+    Rounding = 1,        -- Adjusted for 0.1 steps in UI lib
+    Precision = 1,
     Tooltip = "How often to scan for valid buttons (0 to 2 seconds, step 0.1)",
     Callback = function(value)
-        SCAN_INTERVAL = math.clamp(math.floor(value * 10 + 0.5) / 10, 0, 2) -- round to 0.1
+        SCAN_INTERVAL = math.clamp(math.floor(value * 10 + 0.5) / 10, 0, 2) -- Round to 0.1
         print(string.format("Scan interval set to: %.1f seconds", SCAN_INTERVAL))
         Library:Notify({
             Title = "Scan Interval",
@@ -62,13 +62,15 @@ local ScanIntervalSlider = LeftGroupbox:AddSlider("ScanInterval", {
     end,
 })
 
-local SCAN_INTERVAL = 0.5  -- start with 0.5 seconds
+local SCAN_INTERVAL = 0.3  -- Default scan interval (seconds)
 local AGENT = { AgentRadius = 2, AgentHeight = 5, AgentCanJump = true }
+local WAYPOINT_WAIT_TIME = 3 -- seconds waiting per waypoint
+local FINAL_ARRIVAL_MAX_WAIT = 2 -- timeout for arriving at final position
 
 local char, hum, hrp
 local running = false
 local busy = false
-local selectionMode = "Closest" -- default selection mode
+local selectionMode = "Closest" -- default target selection
 
 local function bindCharacter(c)
     char = c
@@ -235,7 +237,7 @@ local function moveExactlyTo(pos)
         path:ComputeAsync(hrp.Position, pos)
     end)
     if not success then
-        warn("Path computation failed with error:", errMsg)
+        warn("Path compute error:", errMsg)
         return false
     end
 
@@ -247,25 +249,20 @@ local function moveExactlyTo(pos)
     local waypoints = path:GetWaypoints()
     for _, wp in ipairs(waypoints) do
         hum:MoveTo(wp.Position)
-        local reached = hum.MoveToFinished:Wait(6)
+        local reached = hum.MoveToFinished:Wait(WAYPOINT_WAIT_TIME)
         if not reached then
             warn("Failed to reach waypoint: ", wp.Position)
             return false
         end
     end
 
+    -- Final precise move, wait for MoveToFinished event; no distance check
     hum:MoveTo(pos)
-    local arriveTime = os.clock()
-    local maxWait = 5 -- seconds
-
-    while os.clock() - arriveTime < maxWait do
-        if (hrp.Position - pos).Magnitude <= 1 then -- 1 stud threshold
-            return true
-        end
-        task.wait(0.05)
+    local arrived = hum.MoveToFinished:Wait(FINAL_ARRIVAL_MAX_WAIT)
+    if not arrived then
+        warn("Failed to reach final position: ", pos)
     end
-
-    return (hrp.Position - pos).Magnitude <= 1
+    return arrived
 end
 
 local function autoTriggerPrompt(modelOrPart)
@@ -351,3 +348,4 @@ AutoToggle:OnChanged(function(val)
     toast("Auto-path is " .. (val and "ON" or "OFF"))
     print("AutoPathButtons toggled:", val)
 end)
+
