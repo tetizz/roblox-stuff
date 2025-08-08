@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
 local PathfindingService = game:GetService("PathfindingService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 
@@ -23,22 +24,35 @@ local AutoToggle = LeftGroupbox:AddToggle("AutoPathButtons", {
     Tooltip = "Pathfind to affordable, non-premium buttons in your tycoon"
 })
 
+local TargetSelectDropdown = LeftGroupbox:AddDropdown("TargetSelection", {
+    Text = "Target Selection",
+    Default = "Closest",
+    Values = { "Closest", "Cheapest", "Most Expensive" },
+    Multi = false,
+    Tooltip = "Choose how to select the button to path to",
+    Callback = function(value)
+        selectionMode = value
+        print("Target selection mode changed to:", selectionMode)
+        Library:Notify({Title = "Target Selection", Description = "Mode set to " .. selectionMode, Time = 3})
+    end,
+})
+
 local SCAN_INTERVAL = 1.25
-local MAX_RANGE = 500
 local AGENT = { AgentRadius = 2, AgentHeight = 5, AgentCanJump = true }
 
-local player = Players.LocalPlayer
 local char, hum, hrp
 local running = false
 local busy = false
+
+local selectionMode = "Closest" -- default value set initially
 
 local function bindCharacter(c)
     char = c
     hum = c:WaitForChild("Humanoid")
     hrp = c:WaitForChild("HumanoidRootPart")
 end
-if player.Character then bindCharacter(player.Character) end
-player.CharacterAdded:Connect(bindCharacter)
+if localPlayer.Character then bindCharacter(localPlayer.Character) end
+localPlayer.CharacterAdded:Connect(bindCharacter)
 
 local function toast(txt)
     Library:Notify({ Title = "Auto Tycoon", Description = txt, Time = 2 })
@@ -48,11 +62,11 @@ local function getMyTycoon()
     local map = workspace:FindFirstChild("Map")
     local tycoons = map and map:FindFirstChild("Tycoons")
     if not tycoons then return nil end
-    
-    local mine = tycoons:FindFirstChild(player.Name)
+
+    local mine = tycoons:FindFirstChild(localPlayer.Name)
     if mine and mine:IsA("Model") then return mine end
     for _, m in ipairs(tycoons:GetChildren()) do
-        if m:IsA("Model") and m:GetAttribute("OwnerUserId") == player.UserId then
+        if m:IsA("Model") and m:GetAttribute("OwnerUserId") == localPlayer.UserId then
             return m
         end
     end
@@ -60,7 +74,7 @@ local function getMyTycoon()
 end
 
 local function getMana()
-    local pd = player:FindFirstChild("PlayerData")
+    local pd = localPlayer:FindFirstChild("PlayerData")
     local mana = pd and pd:FindFirstChild("Mana")
     local amount = (mana and mana.Value) or 0
     print("Mana checked. Value:", amount)
@@ -93,7 +107,7 @@ local function isValidButton(inst)
     if getMana() < cost then return false end
     local pos = getButtonPivotPos(inst)
     if not pos then return false end
-    if hrp and (hrp.Position - pos).Magnitude > MAX_RANGE then return false end
+    -- Removed max range check as requested
     return true, cost, pos
 end
 
@@ -110,17 +124,53 @@ local function gatherCandidates(root)
     return list
 end
 
-local function pickNearest(cands)
+local function pickTargetBySelection(cands)
+    if #cands == 0 then return nil end
     if not hrp then return nil end
-    local best, bestD
-    for _, c in ipairs(cands) do
-        local d = (hrp.Position - c.pos).Magnitude
-        if not best or d < bestD then
-            best = c
-            bestD = d
+
+    if selectionMode == "Closest" then
+        local best, bestD
+        for _, c in ipairs(cands) do
+            local d = (hrp.Position - c.pos).Magnitude
+            if not best or d < bestD then
+                best = c
+                bestD = d
+            end
         end
+        return best
+
+    elseif selectionMode == "Cheapest" then
+        local best, bestCost = nil, math.huge
+        for _, c in ipairs(cands) do
+            if c.cost < bestCost then
+                bestCost = c.cost
+                best = c
+            end
+        end
+        return best
+
+    elseif selectionMode == "Most Expensive" then
+        local best, bestCost = nil, -math.huge
+        for _, c in ipairs(cands) do
+            if c.cost > bestCost then
+                bestCost = c.cost
+                best = c
+            end
+        end
+        return best
+
+    else
+        -- fallback to closest
+        local best, bestD
+        for _, c in ipairs(cands) do
+            local d = (hrp.Position - c.pos).Magnitude
+            if not best or d < bestD then
+                best = c
+                bestD = d
+            end
+        end
+        return best
     end
-    return best
 end
 
 local function moveExactlyTo(pos)
@@ -154,7 +204,7 @@ local function connectPressOnce(modelOrPart)
     if not prompt then return end
     local conn
     conn = prompt.Triggered:Connect(function(p)
-        if p == player then
+        if p == localPlayer then
             toast("Pressed target: " .. (modelOrPart.Name))
             print("ProximityPrompt triggered for:", modelOrPart.Name)
             if conn then conn:Disconnect() end
@@ -163,7 +213,7 @@ local function connectPressOnce(modelOrPart)
 end
 
 local function getButtonProgressRatio()
-    local bp = player:FindFirstChild("ButtonProgress")
+    local bp = localPlayer:FindFirstChild("ButtonProgress")
     if not bp then
         return nil, nil, nil
     end
@@ -205,7 +255,7 @@ task.spawn(function()
                 continue
             end
             local cands = gatherCandidates(tycoon)
-            local target = pickNearest(cands)
+            local target = pickTargetBySelection(cands)
             if target then
                 StatusLabel:SetText("Target: " .. target.inst.Name)
                 print("Valid target found:", target.inst.Name)
@@ -235,3 +285,4 @@ AutoToggle:OnChanged(function(val)
     toast("Auto-path is " .. (val and "ON" or "OFF"))
     print("AutoPathButtons toggled:", val)
 end)
+
