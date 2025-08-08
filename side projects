@@ -18,7 +18,7 @@ local InfoBox = MainTab:AddRightGroupbox("Status", "info")
 
 local StatusLabel = InfoBox:AddLabel("Idle")
 local ManaLabel = InfoBox:AddLabel("Mana: 0")
-local TotalButtonsLabel = InfoBox:AddLabel("Buttons unlocked: N/A") -- Below ManaLabel
+local TotalButtonsLabel = InfoBox:AddLabel("Buttons unlocked: N/A") -- Below Mana label
 
 local AutoToggle = LeftGroupbox:AddToggle("AutoPathButtons", {
     Text = "Auto path to buttons",
@@ -35,7 +35,11 @@ local TargetSelectDropdown = LeftGroupbox:AddDropdown("TargetSelection", {
     Callback = function(value)
         selectionMode = value
         print("Target selection mode changed to:", selectionMode)
-        Library:Notify({Title = "Target Selection", Description = "Mode set to " .. selectionMode, Time = 3})
+        Library:Notify({
+            Title = "Target Selection",
+            Description = "Mode set to " .. selectionMode,
+            Time = 3
+        })
     end,
 })
 
@@ -77,7 +81,6 @@ local function getMyTycoon()
     if tycoonTemplate and tycoonTemplate:IsA("Model") then
         return tycoonTemplate
     end
-
     return nil
 end
 
@@ -85,7 +88,7 @@ local function getMana()
     local pd = localPlayer:FindFirstChild("PlayerData")
     local mana = pd and pd:FindFirstChild("Mana")
     local amount = (mana and mana.Value) or 0
-    print("Mana checked. Value:", amount)
+    -- print("Mana checked. Value:", amount) -- optional debug print
     return amount
 end
 
@@ -108,12 +111,21 @@ end
 
 local function isValidButton(inst)
     local name = string.lower(inst.Name)
-    if not string.find(name, "button") then return false end
-    if string.find(name, "premium") then return false end
-    
+    if not string.find(name, "button") then
+        return false
+    end
+    if string.find(name, "premium") then
+        return false
+    end
+
     local cost = inst:GetAttribute("UnlockCost")
-    if typeof(cost) ~= "number" then return false end
-    if getMana() < cost then return false end
+    if typeof(cost) ~= "number" then
+        return false
+    end
+
+    if getMana() < cost then
+        return false
+    end
 
     -- Get player's rebirth value safely from PlayerData
     local playerRebirth = 0
@@ -125,7 +137,7 @@ local function isValidButton(inst)
         end
     end
 
-    -- Check button-specific RebirthReq attribute
+    -- Check button-specific rebirth requirement attribute
     local rebirthReq = inst:GetAttribute("RebirthReq")
     if rebirthReq and type(rebirthReq) == "number" then
         if playerRebirth < rebirthReq then
@@ -134,7 +146,9 @@ local function isValidButton(inst)
     end
 
     local pos = getButtonPivotPos(inst)
-    if not pos then return false end
+    if not pos then
+        return false
+    end
 
     return true, cost, pos
 end
@@ -153,8 +167,12 @@ local function gatherCandidates(root)
 end
 
 local function pickTargetBySelection(cands)
-    if #cands == 0 then return nil end
-    if not hrp then return nil end
+    if #cands == 0 then
+        return nil
+    end
+    if not hrp then
+        return nil
+    end
 
     if selectionMode == "Closest" then
         local best, bestD
@@ -166,7 +184,6 @@ local function pickTargetBySelection(cands)
             end
         end
         return best
-
     elseif selectionMode == "Cheapest" then
         local best, bestCost = nil, math.huge
         for _, c in ipairs(cands) do
@@ -176,7 +193,6 @@ local function pickTargetBySelection(cands)
             end
         end
         return best
-
     elseif selectionMode == "Most Expensive" then
         local best, bestCost = nil, -math.huge
         for _, c in ipairs(cands) do
@@ -186,7 +202,6 @@ local function pickTargetBySelection(cands)
             end
         end
         return best
-
     else
         -- fallback to closest
         local best, bestD
@@ -202,24 +217,26 @@ local function pickTargetBySelection(cands)
 end
 
 local function moveExactlyTo(pos)
-    if not hrp or not hum then return false end
-    print("Pathfinding to:", pos)
+    if not hrp or not hum then
+        return false
+    end
+    -- print("Pathfinding to:", pos)
     local path = PathfindingService:CreatePath(AGENT)
     path:ComputeAsync(hrp.Position, pos)
     if path.Status ~= Enum.PathStatus.Success then
-        print("Pathfinding failed")
+        -- print("Pathfinding failed")
         return false
     end
     for _, wp in ipairs(path:GetWaypoints()) do
-        print("Moving to waypoint:", wp.Position)
+        -- print("Moving to waypoint:", wp.Position)
         hum:MoveTo(wp.Position)
         local ok = hum.MoveToFinished:Wait(6)
         if not ok then
-            print("Failed to reach waypoint.")
+            -- print("Failed to reach waypoint.")
             return false
         end
     end
-    print("Moving to final position:", pos)
+    -- print("Moving to final position:", pos)
     hum:MoveTo(pos)
     hum.MoveToFinished:Wait(3)
     return true
@@ -227,15 +244,21 @@ end
 
 local function connectPressOnce(modelOrPart)
     local model = modelOrPart:IsA("Model") and modelOrPart or modelOrPart:FindFirstAncestorWhichIsA("Model")
-    if not model then return end
+    if not model then
+        return
+    end
     local prompt = model:FindFirstChildOfClass("ProximityPrompt") or modelOrPart:FindFirstChildOfClass("ProximityPrompt")
-    if not prompt then return end
+    if not prompt then
+        return
+    end
     local conn
     conn = prompt.Triggered:Connect(function(p)
         if p == localPlayer then
             toast("Pressed target: " .. (modelOrPart.Name))
-            print("ProximityPrompt triggered for:", modelOrPart.Name)
-            if conn then conn:Disconnect() end
+            -- print("ProximityPrompt triggered for:", modelOrPart.Name)
+            if conn then
+                conn:Disconnect()
+            end
         end
     end)
 end
@@ -273,11 +296,11 @@ task.spawn(function()
         if running and not busy and hrp and hum then
             busy = true
             toast("Searching for valid target...")
-            print("Searching for valid target buttons...")
+            -- print("Searching for valid target buttons...")
             local tycoon = getMyTycoon()
             if not tycoon then
                 StatusLabel:SetText("Tycoon not found")
-                print("Tycoon not found for player.")
+                -- print("Tycoon not found for player.")
                 busy = false
                 task.wait(SCAN_INTERVAL)
                 continue
@@ -286,20 +309,20 @@ task.spawn(function()
             local target = pickTargetBySelection(cands)
             if target then
                 StatusLabel:SetText("Target: " .. target.inst.Name)
-                print("Valid target found:", target.inst.Name)
+                -- print("Valid target found:", target.inst.Name)
                 toast("Valid target found: " .. target.inst.Name)
                 toast("Pathfinding to valid target: " .. target.inst.Name)
                 connectPressOnce(target.inst)
                 local ok = moveExactlyTo(target.pos)
                 StatusLabel:SetText("Arrived: " .. target.inst.Name)
                 if ok then
-                    print("Arrived at:", target.inst.Name)
+                    -- print("Arrived at:", target.inst.Name)
                 else
-                    print("Move failed for:", target.inst.Name)
+                    -- print("Move failed for:", target.inst.Name)
                 end
             else
                 StatusLabel:SetText("No valid target")
-                print("No valid target button found!")
+                -- print("No valid target button found!")
             end
             busy = false
         end
