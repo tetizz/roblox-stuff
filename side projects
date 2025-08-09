@@ -381,3 +381,4 @@ TogAutoWpn:OnChanged(function(v)
     autoWpnRunning = v
     StatusLbl:SetText(v and "Enabled Auto Get Weapons" or "Disabled Auto Get Weapons")
 end)
+
