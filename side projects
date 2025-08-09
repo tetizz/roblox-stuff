@@ -1,33 +1,32 @@
--- v1.9.33: safe GUI tracking (no deleting new GUI), version guard, fast delays, auto-rebirth, weapons/buttons/debris
+-- v1.9.35: robust ButtonProgress tracking, safe GUI tracking, fast loops, auto-rebirth, cleanup
 
--- === Version Guard ===
+-- === Version Guard + GUI Tracking ===
 if getgenv().AutoTycoonRunning then
-    warn("Old Auto Tycoon instance found — cleaning it up…")
+    warn("[Auto Tycoon] Old instance found — cleaning it up…")
     if getgenv().AutoTycoonGui and getgenv().AutoTycoonGui.Parent then
-        getgenv().AutoTycoonGui:Destroy()
+        pcall(function() getgenv().AutoTycoonGui:Destroy() end)
     end
-    if getgenv().AutoTycoonCleanup then
-        pcall(getgenv().AutoTycoonCleanup)
-    end
+    if getgenv().AutoTycoonCleanup then pcall(getgenv().AutoTycoonCleanup) end
     return
 end
 getgenv().AutoTycoonRunning = true
+getgenv().AutoTycoonGui = nil
 
--- Track connections/tasks for cleanup
+-- Track for cleanup
 getgenv().AutoTycoonRefs = {conns = {}, tasks = {}}
 local function trackConnection(conn) table.insert(getgenv().AutoTycoonRefs.conns, conn) return conn end
 local function trackTask(thread) table.insert(getgenv().AutoTycoonRefs.tasks, thread) return thread end
 getgenv().AutoTycoonCleanup = function()
     if getgenv().AutoTycoonGui and getgenv().AutoTycoonGui.Parent then
-        getgenv().AutoTycoonGui:Destroy()
+        pcall(function() getgenv().AutoTycoonGui:Destroy() end)
     end
     for _, c in ipairs(getgenv().AutoTycoonRefs.conns) do pcall(function() c:Disconnect() end) end
     for _, t in ipairs(getgenv().AutoTycoonRefs.tasks) do pcall(function() task.cancel(t) end) end
-    getgenv().AutoTycoonRefs = {conns={}, tasks={}}
-    warn("Old instance cleaned.")
+    getgenv().AutoTycoonRefs = {conns = {}, tasks = {}}
+    warn("[Auto Tycoon] Old instance cleaned.")
 end
 
--- === Services/Vars ===
+-- === Services & Player Vars ===
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -39,19 +38,27 @@ local plr = Players.LocalPlayer
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local Win = Library:CreateWindow({
     Title = "Auto Tycoon Bot",
-    Footer = "v1.9.33",
+    Footer = "v1.9.35",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
 })
--- Save this GUI so cleanup only deletes the old one
-getgenv().AutoTycoonGui = Win.Window
+-- Save root GUI ref for cleanup
+local function getRootGuiFrom(win)
+    local obj = win and win.Window or nil
+    while obj and obj.Parent ~= game:GetService("CoreGui") do
+        obj = obj.Parent
+    end
+    return obj
+end
+getgenv().AutoTycoonGui = getRootGuiFrom(Win)
 
+-- Tabs & Controls
 local TabMain = Win:AddTab("Main", "home")
 local LeftBox = TabMain:AddLeftGroupbox("Control", "wrench")
-local TogAutoBtn = LeftBox:AddToggle("AutoBtn", { Text = "Auto Buttons", Default = false })
-local TogAutoWpn = LeftBox:AddToggle("AutoWpn", { Text = "Auto get weapons", Default = false })
-local SliderScan = LeftBox:AddSlider("ScanInt", { Text = "Scan Interval (sec)", Default = 0.3, Min = 0, Max = 2 })
+local TogAutoBtn = LeftBox:AddToggle("AutoBtn", {Text = "Auto Buttons", Default = false})
+local TogAutoWpn = LeftBox:AddToggle("AutoWpn", {Text = "Auto get weapons", Default = false})
+local SliderScan = LeftBox:AddSlider("ScanInt", {Text = "Scan Interval (sec)", Default = 0.3, Min = 0, Max = 2})
 
 local AutofarmStatsBox = TabMain:AddLeftGroupbox("Autofarm Stats", "chart-line")
 local SessionTimeLbl = AutofarmStatsBox:AddLabel("Session Time: 0m 0s")
@@ -68,66 +75,103 @@ local ButtonsLbl = StatusBox:AddLabel("Buttons unlocked: N/A")
 local StatsBox = TabMain:AddRightGroupbox("Stats", "clipboard-list")
 local MasteryLbl = StatsBox:AddLabel("Mastery will appear here")
 
--- === Core Vars ===
+-- Core runtime vars
 local running, autoWpnRunning, busy, rebirthing, didUpg = false, false, false, false, false
 local char, hum, hrp
 local PlayerData, ManaVal
 local sessionStart = tick()
-local rebirthStarted, rebirthCooldown = false, false
-local buttonPressCount = 0
-local rebirthDurations, rebirthButtonCounts = {}, {}
+local rebirthCooldown = false
 local REBIRTH_STATS_HISTORY = 10
+local rebirthDurations, rebirthButtonCounts = {}, {}
 
--- === Helpers ===
-local function notify(msg) Library:Notify({ Title = "Auto Tycoon", Description = msg, Time = 2 }) end
-local function formatTime(sec) local m = math.floor(sec / 60) sec = math.floor(sec % 60) return ("%dm %ds"):format(m, sec) end
+local function notify(msg) Library:Notify({Title="Auto Tycoon", Description=msg, Time=2}) end
+local function formatTime(sec) local m=math.floor(sec/60) sec=math.floor(sec%60) return ("%dm %ds"):format(m, sec) end
 
--- === Init Character/Data ===
+-- === Character/Data Binding ===
 trackTask(task.spawn(function()
     repeat PlayerData = plr:FindFirstChild("PlayerData") task.wait() until PlayerData
     repeat ManaVal = PlayerData:FindFirstChild("Mana") task.wait() until ManaVal
+    MasteryLbl:SetText("Mastery loaded")
 end))
-if plr.Character then char = plr.Character hum = char:WaitForChild("Humanoid") hrp = char:WaitForChild("HumanoidRootPart") end
-trackConnection(plr.CharacterAdded:Connect(function(c) char = c hum = c:WaitForChild("Humanoid") hrp = c:WaitForChild("HumanoidRootPart") end))
+if plr.Character then char=plr.Character hum=char:WaitForChild("Humanoid") hrp=char:WaitForChild("HumanoidRootPart") end
+trackConnection(plr.CharacterAdded:Connect(function(c) char=c hum=c:WaitForChild("Humanoid") hrp=c:WaitForChild("HumanoidRootPart") end))
 
 local function getMana() return ManaVal and ManaVal.Value or 0 end
 
--- === Buttons ===
+-- === Robust ButtonProgress Binding ===
+local ButtonProgress, UnlockedButtons, TotalButtons
+local function bindButtonProgress()
+    ButtonProgress, UnlockedButtons, TotalButtons = nil, nil, nil
+    repeat
+        ButtonProgress = plr:FindFirstChild("ButtonProgress")
+        if not ButtonProgress then
+            warn("[Auto Tycoon] Waiting for ButtonProgress...")
+            task.wait(1)
+        end
+    until ButtonProgress
+    UnlockedButtons = ButtonProgress:FindFirstChild("UnlockedButtons") or ButtonProgress:WaitForChild("UnlockedButtons", 10)
+    TotalButtons = ButtonProgress:FindFirstChild("TotalButtons") or ButtonProgress:WaitForChild("TotalButtons", 10)
+
+    if UnlockedButtons then
+        trackConnection(UnlockedButtons.Changed:Connect(function(v)
+            print("[Auto Tycoon] UnlockedButtons:", v)
+        end))
+    end
+    if TotalButtons then
+        trackConnection(TotalButtons.Changed:Connect(function(v)
+            print("[Auto Tycoon] TotalButtons:", v)
+        end))
+    end
+    print("[Auto Tycoon] ButtonProgress bound:", UnlockedButtons and UnlockedButtons.Value, "/", TotalButtons and TotalButtons.Value)
+end
+bindButtonProgress()
+trackConnection(plr.ChildAdded:Connect(function(c)
+    if c.Name=="ButtonProgress" then
+        print("[Auto Tycoon] Rebinding ButtonProgress")
+        bindButtonProgress()
+    end
+end))
+
+-- === Button Logic ===
 local function attrAnywhere(m,k) if m:GetAttribute(k)~=nil then return true end for _,d in ipairs(m:GetDescendants()) do if d:GetAttribute(k)~=nil then return true end end return false end
 local function getBtnPos(inst) local m=inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model") if not m then return nil end return m.PrimaryPart and m.PrimaryPart.Position or m:GetPivot().Position end
 local function validBtn(inst) local m=inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model") if not(m and m:FindFirstChild("Button_Indicator",true)) then return false end if not attrAnywhere(m,"Premium") and not attrAnywhere(m,"RebirthReq") then return false end if getMana()<(inst:GetAttribute("UnlockCost") or math.huge) then return false end return getBtnPos(inst)~=nil end
 local function gatherCands(root) local res={} for _,inst in ipairs(root:GetDescendants()) do if validBtn(inst) then table.insert(res,{inst=inst}) end end return res end
-local function bringBtnAndTrigger(inst) if not hrp then return end local m=inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model") for _,p in ipairs(m:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false p.Massless=true end end m:PivotTo(hrp.CFrame * CFrame.new(0,0,-2)) task.wait() local prompt=m:FindFirstChildOfClass("ProximityPrompt") or m:FindFirstChildWhichIsA("ProximityPrompt",true) if prompt then prompt.MaxActivationDistance, prompt.RequiresLineOfSight=15, false prompt:InputHoldBegin() task.wait(prompt.HoldDuration+0.01) prompt:InputHoldEnd() VirtualInputManager:SendKeyEvent(true,"E",false,game) task.wait() VirtualInputManager:SendKeyEvent(false,"E",false,game) end end
+local function bringBtnAndTrigger(inst) if not hrp then return end local m=inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model") for _,p in ipairs(m:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false p.Massless=true end end m:PivotTo(hrp.CFrame*CFrame.new(0,0,-2)) task.wait() local prompt=m:FindFirstChildOfClass("ProximityPrompt") or m:FindFirstChildWhichIsA("ProximityPrompt",true) if prompt then prompt.MaxActivationDistance, prompt.RequiresLineOfSight=15,false prompt:InputHoldBegin() task.wait(prompt.HoldDuration+0.01) prompt:InputHoldEnd() VirtualInputManager:SendKeyEvent(true,"E",false,game) task.wait() VirtualInputManager:SendKeyEvent(false,"E",false,game) end end
 
 -- === Debris ===
-local function teleportDebrisParts() local debris=Workspace:FindFirstChild("Debris") if not debris or not hrp then return end for _,name in ipairs({"Premium_Manana","Manana","Purple_Crystal","Blue_Crystal"}) do local part=debris:FindFirstChild(name) if part and part:IsA("BasePart") then part.CanCollide,part.Massless=false,true part.CFrame=hrp.CFrame task.wait() break end end end
+local function teleportDebrisParts()
+    local debris=Workspace:FindFirstChild("Debris") if not debris or not hrp then return end
+    for _,name in ipairs({"Premium_Manana","Manana","Purple_Crystal","Blue_Crystal"}) do
+        local part=debris:FindFirstChild(name)
+        if part and part:IsA("BasePart") then part.CanCollide,part.Massless=false,true part.CFrame=hrp.CFrame task.wait() break end
+    end
+end
 
--- === Weapons ===
+-- === Weapons (Backpack Check) ===
 local weaponCollectionCooldown = 0
 local function autoGetWeaponsOptimized()
-    if not hrp or tick() < weaponCollectionCooldown then return end
+    if not hrp or tick()<weaponCollectionCooldown then return end
     local folder=Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Tycoons")
     if not folder then return end
     for _,tycoonModel in ipairs(folder:GetChildren()) do
         for _,stand in ipairs(tycoonModel:GetChildren()) do
             if stand:IsA("Model") and stand.Name:find("SpellStand") then
                 local prompts={} for _,d in ipairs(stand:GetDescendants()) do if d:IsA("ProximityPrompt") then table.insert(prompts,d) end end
-                local weaponName for _,prompt in ipairs(prompts) do if prompt.ActionText and prompt.ActionText~="" then weaponName=prompt.ActionText end end
+                local weaponName for _,pr in ipairs(prompts) do if pr.ActionText~="" then weaponName=pr.ActionText end end
                 if not weaponName or plr.Backpack:FindFirstChild(weaponName) then continue end
                 local originalPos=hrp.CFrame
                 local targetPart=prompts[1].Parent:IsA("BasePart") and prompts[1].Parent or prompts[1].Parent:FindFirstChildWhichIsA("BasePart")
-                if targetPart then hrp.CFrame=targetPart.CFrame * CFrame.new(0,0,-1) end
+                if targetPart then hrp.CFrame=targetPart.CFrame*CFrame.new(0,0,-1) end
                 task.wait()
                 local startTime=tick()
                 while not plr.Backpack:FindFirstChild(weaponName) and tick()-startTime<3 do
-                    for _,prompt in ipairs(prompts) do
-                        if prompt:IsA("ProximityPrompt") then
-                            prompt.MaxActivationDistance, prompt.RequiresLineOfSight = 15, false
-                            if prompt.Enabled then prompt:InputHoldBegin() task.wait(prompt.HoldDuration+0.01) prompt:InputHoldEnd() end
+                    for _,pr in ipairs(prompts) do
+                        if pr:IsA("ProximityPrompt") then
+                            pr.MaxActivationDistance=15 pr.RequiresLineOfSight=false
+                            if pr.Enabled then pr:InputHoldBegin() task.wait(pr.HoldDuration+0.01) pr:InputHoldEnd() end
                         end
-                        VirtualInputManager:SendKeyEvent(true,"E",false,game)
-                        task.wait()
-                        VirtualInputManager:SendKeyEvent(false,"E",false,game)
+                        VirtualInputManager:SendKeyEvent(true,"E",false,game) task.wait() VirtualInputManager:SendKeyEvent(false,"E",false,game)
                     end
                     task.wait()
                 end
@@ -155,14 +199,31 @@ end
 
 -- === Main Loop ===
 trackTask(task.spawn(function()
+    local lastRebirth = tick()
     while true do
+        if UnlockedButtons and TotalButtons then
+            local unlocked=UnlockedButtons.Value
+            local total=TotalButtons.Value
+            ButtonsLbl:SetText(("Buttons unlocked: %d / %d"):format(unlocked, total))
+            if running and unlocked==total and not rebirthCooldown then
+                rebirthCooldown=true
+                table.insert(rebirthDurations, tick()-lastRebirth)
+                table.insert(rebirthButtonCounts, unlocked)
+                doRebirth()
+                lastRebirth=tick()
+                task.delay(5,function() rebirthCooldown=false end)
+            end
+        else
+            ButtonsLbl:SetText("Buttons unlocked: Loading...")
+        end
+        ManaLbl:SetText("Mana: "..tostring(getMana()))
         teleportDebrisParts()
-        if running and not busy and not rebirthing then busy=true local tyc=Workspace.Map.Tycoons:FindFirstChild(plr.Name) if tyc then local cands=gatherCands(tyc) if #cands>0 then bringBtnAndTrigger(cands[1].inst) end end busy=false end
+        if running and not busy and not rebirthing then busy=true local ty=Workspace.Map.Tycoons:FindFirstChild(plr.Name) if ty then local cands=gatherCands(ty) if #cands>0 then bringBtnAndTrigger(cands[1].inst) end end busy=false end
         if autoWpnRunning and not busy and not rebirthing then busy=true autoGetWeaponsOptimized() busy=false end
         task.wait(SliderScan.Value or 0.3)
     end
 end))
 
--- === Toggles ===
+-- Toggles
 TogAutoBtn:OnChanged(function(v) running=v end)
 TogAutoWpn:OnChanged(function(v) autoWpnRunning=v end)
