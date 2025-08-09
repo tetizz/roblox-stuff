@@ -1,4 +1,4 @@
--- v1.9.25: Mastery label auto-resize, Autofarm Stats on left, session timer, antiAFK, better rebirth timing
+-- v1.9.25 with teleport-to-SpellStand weapon pickup & teleport back
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -44,7 +44,7 @@ MasteryLbl.TextYAlignment = Enum.TextYAlignment.Top
 MasteryLbl.TextWrapped = true
 MasteryLbl.TextTruncate = Enum.TextTruncate.None
 
--- Vars & tracking
+-- Variables
 local SCAN_INT = 0.3
 local running, autoWpnRunning, busy, rebirthing, didUpg = false, false, false, false, false
 local char, hum, hrp
@@ -145,100 +145,7 @@ local function getMana()
     return (ManaVal and ManaVal.Value) or 0
 end
 
-local function attrAnywhere(m, k)
-    if m:GetAttribute(k) ~= nil then return true end
-    for _, d in ipairs(m:GetDescendants()) do
-        if d:GetAttribute(k) ~= nil then return true end
-    end
-    return false
-end
-
-local function getBtnPos(inst)
-    local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
-    if not m then return nil end
-    if m.PrimaryPart then return m.PrimaryPart.Position end
-    return m:GetPivot().Position
-end
-
-local function validBtn(inst)
-    local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
-    if not m or not m:FindFirstChild("Button_Indicator", true) then return false end
-    if not attrAnywhere(m, "Premium") and not attrAnywhere(m, "RebirthReq") then return false end
-    if getMana() < (inst:GetAttribute("UnlockCost") or math.huge) then return false end
-    if not getBtnPos(inst) then return false end
-    return true, inst:GetAttribute("UnlockCost"), getBtnPos(inst)
-end
-
-local function gatherCands(root)
-    local res = {}
-    for _, inst in ipairs(root:GetDescendants()) do
-        local ok, c = validBtn(inst)
-        if ok then table.insert(res, {inst = inst, cost = c}) end
-    end
-    return res
-end
-
-local function bringBtn(inst)
-    if not hrp then return end
-    local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
-    if m and m.PrimaryPart then
-        local offset = (hrp.CFrame * CFrame.new(0, 0, -2)).Position - m.PrimaryPart.Position
-        for _, p in ipairs(m:GetDescendants()) do
-            if p:IsA("BasePart") then
-                p.CanCollide = false
-                p.Massless = true
-                p.CFrame = p.CFrame + offset
-            end
-        end
-    end
-end
-
-local function triggerPrompt(tgt)
-    local prompt = tgt:FindFirstChildOfClass("ProximityPrompt") or (tgt.Parent and tgt.Parent:FindFirstChildOfClass("ProximityPrompt"))
-    if prompt and prompt.Enabled then
-        prompt:InputHoldBegin()
-        task.wait(prompt.HoldDuration + 0.05)
-        prompt:InputHoldEnd()
-    end
-end
-
-local function teleportDebrisParts()
-    local debris = Workspace:FindFirstChild("Debris")
-    if not debris or not hrp then return end
-    for _, name in ipairs({"Premium_Manana", "Manana", "Purple_Crystal", "Blue_Crystal"}) do
-        local part = debris:FindFirstChild(name)
-        if part and part:IsA("BasePart") then
-            part.CanCollide = false
-            part.Massless = true
-            part.CFrame = hrp.CFrame
-            repeat task.wait(0.05) until not debris:FindFirstChild(name)
-            break
-        end
-    end
-end
-
-local function doRebirth()
-    rebirthing = true
-    didUpg = false
-    notify("Starting rebirth...")
-    local repEv = ReplicatedStorage:WaitForChild("RemoteEvents")
-    repEv.RebirthCallback:InvokeServer(plr)
-    task.wait(3)
-    if not didUpg then
-        local points = PlayerData and PlayerData.UpgradePoints
-        if points and points.Value > 0 then
-            for _, s in ipairs({"Jump", "Speed", "Regen", "Health"}) do
-                repEv.UpgradeCallback:InvokeServer(s)
-            end
-            didUpg = true
-        end
-    end
-    repEv.PickCallback:InvokeServer()
-    rebirthing = false
-    updateMasteryLabels(getMasteryStr())
-end
-
--- Returns true if player backpack has the specified weapon name
+-- Weapon check
 local function hasWeapon(name)
     local backpack = plr:FindFirstChild("Backpack")
     if not backpack then return false end
@@ -248,7 +155,7 @@ local function hasWeapon(name)
     return false
 end
 
--- Auto weapon pickup logic - scans all tycoon grandchildren SpellStands for weapons you don't own
+-- Teleport to SpellStand, trigger, teleport back
 local function autoGetWeapon()
     if not hrp then return end
     local tycoonsFolder = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Tycoons")
@@ -271,33 +178,43 @@ local function autoGetWeapon()
                         weaponName = prompt.ActionText
                     end
                 end
-                if not weaponName then continue end
+                if not weaponName or hasWeapon(weaponName) then continue end
 
-                if hasWeapon(weaponName) then continue end
+                -- Save current position
+                local myPos = hrp.CFrame
 
+                -- Teleport to SpellStand
                 if not grandchild.PrimaryPart then
                     local prim = grandchild:FindFirstChildWhichIsA("BasePart")
                     if prim then grandchild.PrimaryPart = prim end
                 end
                 if grandchild.PrimaryPart then
-                    grandchild:SetPrimaryPartCFrame(hrp.CFrame * CFrame.new(0, 0, -2))
+                    hrp.CFrame = grandchild.PrimaryPart.CFrame * CFrame.new(0, 0, -3)
                 end
+                task.wait(0.15)
 
+                -- Trigger both prompts
                 for _, prompt in ipairs(prompts) do
-                    if prompt.Enabled and (hrp.Position - prompt.Parent.Position).Magnitude <= prompt.MaxActivationDistance then
+                    if prompt.Enabled then
                         prompt:InputHoldBegin()
                         task.wait(prompt.HoldDuration + 0.1)
                         prompt:InputHoldEnd()
                     end
+                    task.wait(0.1)
                 end
 
-                StatusLbl:SetText("Collected weapon: " .. weaponName)
+                task.wait(0.2)
+                -- TP back
+                hrp.CFrame = myPos
+
+                StatusLbl:SetText("Teleported for: " .. weaponName)
                 return
             end
         end
     end
 end
 
+-- Main loop
 task.spawn(function()
     local lastButtonValue = nil
     while true do
@@ -333,18 +250,14 @@ task.spawn(function()
                 updateAutofarmStats()
                 rebirthStarted = false
                 rebirthStartTime, rebirthEndTime, lastButtonValue = nil, nil, 0
-                if running then
-                    doRebirth()
-                else
-                    notify("All buttons unlocked. Auto Buttons is OFF; no auto rebirth.")
-                end
+                if running then doRebirth() else notify("All buttons unlocked. Auto Buttons off.") end
             end
         else
             ButtonsLbl:SetText("Buttons unlocked: N/A")
         end
         ManaLbl:SetText("Mana: " .. tostring(getMana()))
-        teleportDebrisParts()
 
+        teleportDebrisParts()
         if running and not busy and not rebirthing then
             busy = true
             local tycoon = Workspace.Map.Tycoons:FindFirstChild(plr.Name)
@@ -362,13 +275,11 @@ task.spawn(function()
             end
             busy = false
         end
-
         if autoWpnRunning and not busy and not rebirthing then
             busy = true
             autoGetWeapon()
             busy = false
         end
-
         task.wait(SliderScan.Value or SCAN_INT)
     end
 end)
@@ -381,4 +292,3 @@ TogAutoWpn:OnChanged(function(v)
     autoWpnRunning = v
     StatusLbl:SetText(v and "Enabled Auto Get Weapons" or "Disabled Auto Get Weapons")
 end)
-
