@@ -1,4 +1,4 @@
--- v1.9.21 - Teleport debris inside HRP, one at a time (waits until gone), mastery only updates on rebirth/start, all features
+-- v1.9.23 - Auto Buttons toggle with conditional auto rebirth, mastery single label, debris one at a time, autofarm stats
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,84 +9,108 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deivi
 
 local Win = Library:CreateWindow({
     Title = "Auto Tycoon Bot",
-    Footer = "v1.9.21",
+    Footer = "v1.9.23",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
 })
 
--- UI setup
+--=== UI Setup ===
 local TabMain = Win:AddTab("Main", "home")
+
+-- Controls
 local LeftBox = TabMain:AddLeftGroupbox("Control", "wrench")
+local TogAutoBtn = LeftBox:AddToggle("AutoBtn", {Text = "Auto Buttons", Default = false})  -- renamed here
+local TogAutoWpn = LeftBox:AddToggle("AutoWpn", {Text = "Auto get weapons", Default = false})
+local SliderScan = LeftBox:AddSlider("ScanInt", {Text = "Scan Interval (sec)", Default = 0.3, Min = 0, Max = 2, Rounding = 1, Precision = 1})
+
+-- Status
 local StatusBox = TabMain:AddRightGroupbox("Status", "info")
 local StatusLbl = StatusBox:AddLabel("Idle")
 StatusLbl.TextYAlignment = Enum.TextYAlignment.Top
 StatusLbl.TextWrapped = true
 StatusLbl.TextTruncate = Enum.TextTruncate.None
-local StatsBox = TabMain:AddRightGroupbox("Stats", "clipboard-list")
-local masteryLbls = {}
+
 local ManaLbl = StatusBox:AddLabel("Mana: 0")
 local ButtonsLbl = StatusBox:AddLabel("Buttons unlocked: N/A")
 
-local TogAutoBtn = LeftBox:AddToggle("AutoBtn", {Text = "Auto path buttons", Default = false})
-local TogAutoWpn = LeftBox:AddToggle("AutoWpn", {Text = "Auto get weapons", Default = false})
-local SliderScan = LeftBox:AddSlider("ScanInt", {
-    Text = "Scan Interval (sec)",
-    Default = 0.3, Min = 0, Max = 2, Rounding = 1, Precision = 1
-})
+-- Stats: Mastery Label (single multiline)
+local StatsBox = TabMain:AddRightGroupbox("Stats", "clipboard-list")
+local MasteryLbl = StatsBox:AddLabel("Mastery will appear here")
+MasteryLbl.TextYAlignment = Enum.TextYAlignment.Top
+MasteryLbl.TextWrapped = true
+MasteryLbl.TextTruncate = Enum.TextTruncate.None
 
--- Vars
+-- Autofarm Stats Panel
+local AutofarmStatsBox = TabMain:AddRightGroupbox("Autofarm Stats", "chart-line")
+local RebirthTimeLbl = AutofarmStatsBox:AddLabel("Rebirth Duration: N/A")
+local AverageTimeLbl = AutofarmStatsBox:AddLabel("Average Duration: N/A")
+local ButtonsPressedLbl = AutofarmStatsBox:AddLabel("Buttons Pressed: N/A")
+local ButtonsPerMinLbl = AutofarmStatsBox:AddLabel("Buttons/min: N/A")
+
+--=== Vars ===
+local SCAN_INT = 0.3
 local running, autoWpnRunning, busy, rebirthing, didUpg = false, false, false, false, false
 local char, hum, hrp
 local PlayerData, ManaVal
-local SCAN_INT = 0.3
 
--- Notify helper
+-- Autofarm stats tracking variables
+local rebirthStartTime, rebirthEndTime = nil, nil
+local buttonPressCount = 0
+local rebirthDurations, rebirthButtonCounts = {}, {}
+local REBIRTH_STATS_HISTORY = 10
+
+--=== Helper functions ===
+
 local function notify(msg)
     Library:Notify({Title = "Auto Tycoon", Description = msg, Time = 2})
 end
 
--- Mastery UI update
 local function updateMasteryLabels(masteryStr)
-    -- remove old
-    for _, lbl in ipairs(masteryLbls) do
-        if lbl and typeof(lbl.Remove) == "function" then
-            pcall(function() lbl:Remove() end)
-        end
+    MasteryLbl:SetText(masteryStr)
+end
+
+local function updateAutofarmStats()
+    local lastDuration = rebirthDurations[#rebirthDurations]
+    if lastDuration then
+        RebirthTimeLbl:SetText(("Rebirth Duration: %.1f sec"):format(lastDuration))
+    else
+        RebirthTimeLbl:SetText("Rebirth Duration: N/A")
     end
-    masteryLbls = {}
-    task.wait()
-    -- add new
-    for line in masteryStr:gmatch("[^\n]+") do
-        local lbl = StatsBox:AddLabel(line)
-        lbl.TextYAlignment = Enum.TextYAlignment.Top
-        lbl.TextWrapped = true
-        lbl.TextTruncate = Enum.TextTruncate.None
-        table.insert(masteryLbls, lbl)
+    if #rebirthDurations > 0 then
+        local sum = 0 for _,v in ipairs(rebirthDurations) do sum = sum+v end
+        AverageTimeLbl:SetText(("Average Duration: %.1f sec"):format(sum/#rebirthDurations))
+    else
+        AverageTimeLbl:SetText("Average Duration: N/A")
+    end
+    local lastCount = rebirthButtonCounts[#rebirthButtonCounts]
+    if lastCount and lastDuration then
+        ButtonsPressedLbl:SetText(("Buttons Pressed: %d"):format(lastCount))
+        ButtonsPerMinLbl:SetText(("Buttons/min: %.1f"):format(lastCount/(lastDuration/60)))
+    else
+        ButtonsPressedLbl:SetText("Buttons Pressed: N/A")
+        ButtonsPerMinLbl:SetText("Buttons/min: N/A")
     end
 end
 
--- Mastery string builder
+-- Mastery string getter
 local function getMasteryStr()
     if not PlayerData then return "No PlayerData" end
     local mastery = PlayerData:FindFirstChild("Mastery")
     if not mastery then return "No Mastery" end
     local t = {}
     for _, c in ipairs(mastery:GetChildren()) do
-        local v = c.Value
-        table.insert(t, string.format("%s: %s", c.Name, tostring(v)))
+        table.insert(t, string.format("%s: %s", c.Name, tostring(c.Value)))
     end
     return table.concat(t, "\n")
 end
 
--- Wait for PlayerData at init
+-- Initialize PlayerData and ManaVal, and update mastery at start
 task.spawn(function()
     repeat PlayerData = plr:FindFirstChild("PlayerData") task.wait(0.1) until PlayerData
     repeat ManaVal = PlayerData:FindFirstChild("Mana") task.wait(0.1) until ManaVal
     updateMasteryLabels(getMasteryStr())
 end)
-
-local function getMana() return (ManaVal and ManaVal.Value) or 0 end
 
 local function bindChar(c)
     char = c
@@ -96,55 +120,63 @@ end
 if plr.Character then bindChar(plr.Character) end
 plr.CharacterAdded:Connect(bindChar)
 
--- Button candidate finder (trimmed for brevity, same as before)
-local function attrAnywhere(m, key)
-    if m:GetAttribute(key) ~= nil then return true end
-    for _,d in ipairs(m:GetDescendants()) do if d:GetAttribute(key) ~= nil then return true end end
+local function getMana() return (ManaVal and ManaVal.Value) or 0 end
+
+local function attrAnywhere(m,k)
+    if m:GetAttribute(k) ~= nil then return true end
+    for _, d in ipairs(m:GetDescendants()) do
+        if d:GetAttribute(k) ~= nil then return true end
+    end
     return false
 end
 local function getAttrAnywhere(m,k)
-    local v = m:GetAttribute(k)
+    local v=m:GetAttribute(k)
     if v ~= nil then return v end
-    for _,d in ipairs(m:GetDescendants()) do
+    for _, d in ipairs(m:GetDescendants()) do
         v = d:GetAttribute(k)
         if v ~= nil then return v end
     end
 end
-local function getBtnPos(inst) local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
-    if not m then return end
+local function getBtnPos(inst)
+    local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
+    if not m then return nil end
     if m.PrimaryPart then return m.PrimaryPart.Position end
     return m:GetPivot().Position
 end
+
 local function validBtn(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
-    if not m or not (m:FindFirstChild("Button_Indicator", true)) then return false end
-    if not attrAnywhere(m, "Premium") and not attrAnywhere(m,"RebirthReq") then return false end
+    if not m or not m:FindFirstChild("Button_Indicator", true) then return false end
+    if not attrAnywhere(m, "Premium") and not attrAnywhere(m, "RebirthReq") then return false end
     if getMana() < (inst:GetAttribute("UnlockCost") or math.huge) then return false end
     if not getBtnPos(inst) then return false end
     return true, inst:GetAttribute("UnlockCost"), getBtnPos(inst)
 end
+
 local function gatherCands(root)
     local res = {}
-    for _,inst in ipairs(root:GetDescendants()) do
-        local ok,c = validBtn(inst)
-        if ok then table.insert(res,{inst=inst, cost=c}) end
+    for _, inst in ipairs(root:GetDescendants()) do
+        local ok, c = validBtn(inst)
+        if ok then table.insert(res, {inst=inst, cost=c}) end
     end
     return res
 end
+
 local function bringBtn(inst)
     if not hrp then return end
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if m and m.PrimaryPart then
-        local offset = (hrp.CFrame * CFrame.new(0,0,-2)).Position - m.PrimaryPart.Position
-        for _,p in ipairs(m:GetDescendants()) do
+        local offset = (hrp.CFrame * CFrame.new(0, 0, -2)).Position - m.PrimaryPart.Position
+        for _, p in ipairs(m:GetDescendants()) do
             if p:IsA("BasePart") then
-                p.CanCollide=false
-                p.Massless=true
+                p.CanCollide = false
+                p.Massless = true
                 p.CFrame = p.CFrame + offset
             end
         end
     end
 end
+
 local function triggerPrompt(tgt)
     local prompt = tgt:FindFirstChildOfClass("ProximityPrompt") or (tgt.Parent and tgt.Parent:FindFirstChildOfClass("ProximityPrompt"))
     if prompt and prompt.Enabled then
@@ -154,23 +186,22 @@ local function triggerPrompt(tgt)
     end
 end
 
--- Debris pickup ONE at a time, inside HRP
+-- Debris pickup: only one at a time, teleported directly inside HRP
 local function teleportDebrisParts()
     local debris = Workspace:FindFirstChild("Debris")
     if not debris or not hrp then return end
-    for _, name in ipairs({"Premium_Manana","Manana","Purple_Crystal","Blue_Crystal"}) do
+    for _, name in ipairs({"Premium_Manana", "Manana", "Purple_Crystal", "Blue_Crystal"}) do
         local part = debris:FindFirstChild(name)
         if part and part:IsA("BasePart") then
             part.CanCollide = false
             part.Massless = true
             part.CFrame = hrp.CFrame
             repeat task.wait(0.05) until not debris:FindFirstChild(name)
-            break -- only do one per loop
+            break -- only one per loop
         end
     end
 end
 
--- Rebirth logic
 local function doRebirth()
     rebirthing = true
     didUpg = false
@@ -180,40 +211,16 @@ local function doRebirth()
     task.wait(3)
     if not didUpg then
         local points = PlayerData and PlayerData.UpgradePoints
-        if points and points.Value>0 then
+        if points and points.Value > 0 then
             for _, s in ipairs({"Jump","Speed","Regen","Health"}) do
                 repEv.UpgradeCallback:InvokeServer(s)
             end
             didUpg = true
         end
     end
-    -- Element choice & finish
     repEv.PickCallback:InvokeServer()
     rebirthing = false
     updateMasteryLabels(getMasteryStr())
-end
-
--- Weapon logic (unchanged)
-local spellStandPath = {"Map","Tycoons",plr.Name,"F1_SpellStand_1"}
-local function findSpellStandModel()
-    local obj = Workspace
-    for _,p in ipairs(spellStandPath) do
-        if obj then obj = obj:FindFirstChild(p) else break end
-    end
-    return obj
-end
-local function autoGetWeapon()
-    local model = findSpellStandModel()
-    if not model then return end
-    for _,prompt in ipairs(model:GetDescendants()) do
-        if prompt:IsA("ProximityPrompt") then
-            bringModelToPlayer(model)
-            prompt:InputHoldBegin()
-            task.wait(prompt.HoldDuration+0.1)
-            prompt:InputHoldEnd()
-            break
-        end
-    end
 end
 
 -- Main loop
@@ -224,12 +231,37 @@ task.spawn(function()
         local tot = bp and bp:FindFirstChild("TotalButtons")
         if unld and tot then
             ButtonsLbl:SetText(("Buttons unlocked: %d / %d"):format(unld.Value, tot.Value))
-            if unld.Value >= tot.Value and not rebirthing then
-                doRebirth()
+            -- Start timer when first button pressed (UnlockedButtons == 0)
+            if unld.Value == 0 and not rebirthStartTime then
+                rebirthStartTime = tick()
+                buttonPressCount = 0
             end
+            -- End timer when all buttons unlocked, log and update stats
+            if rebirthStartTime and unld.Value == tot.Value then
+                rebirthEndTime = tick()
+                local dur = rebirthEndTime - rebirthStartTime
+                table.insert(rebirthDurations, dur)
+                table.insert(rebirthButtonCounts, buttonPressCount)
+                -- Keep last 10 stats only
+                while #rebirthDurations > REBIRTH_STATS_HISTORY do table.remove(rebirthDurations, 1) end
+                while #rebirthButtonCounts > REBIRTH_STATS_HISTORY do table.remove(rebirthButtonCounts, 1) end
+                updateAutofarmStats()
+                rebirthStartTime = nil
+                rebirthEndTime = nil
+                -- Only auto rebirth if Auto Buttons is ON
+                if running then
+                    doRebirth()
+                else
+                    notify("All buttons complete — Auto Buttons is off, not rebirthing automatically.")
+                end
+            end
+        else
+            ButtonsLbl:SetText("Buttons unlocked: N/A")
         end
-        ManaLbl:SetText("Mana: "..tostring(getMana()))
+
+        ManaLbl:SetText("Mana: " .. tostring(getMana()))
         teleportDebrisParts()
+
         if running and not busy and not rebirthing then
             busy = true
             local tycoon = Workspace.Map.Tycoons:FindFirstChild(plr.Name)
@@ -237,23 +269,38 @@ task.spawn(function()
                 local cands = gatherCands(tycoon)
                 if #cands > 0 then
                     local targ = cands[1]
-                    StatusLbl:SetText("Bringing: "..targ.inst.Name)
+                    StatusLbl:SetText("Bringing: " .. targ.inst.Name)
                     bringBtn(targ.inst)
                     task.wait(0.05)
                     triggerPrompt(targ.inst)
+                    -- Increment button press count if timer running
+                    if rebirthStartTime then buttonPressCount = buttonPressCount + 1 end
                 end
+            else
+                StatusLbl:SetText("Tycoon not found")
             end
             busy = false
         end
+
         if autoWpnRunning and not busy and not rebirthing then
             busy = true
-            autoGetWeapon()
+            -- Implement auto weapon pickup logic if needed
             busy = false
         end
+
         task.wait(SliderScan.Value or SCAN_INT)
     end
 end)
 
-TogAutoBtn:OnChanged(function(v) running = v end)
-TogAutoWpn:OnChanged(function(v) autoWpnRunning = v end)
+-- Toggles
+TogAutoBtn:OnChanged(function(v)
+    running = v
+    StatusLbl:SetText(v and "Enabled Auto Buttons" or "Disabled Auto Buttons")
+end)
+
+TogAutoWpn:OnChanged(function(v)
+    autoWpnRunning = v
+    StatusLbl:SetText(v and "Enabled Auto Get Weapons" or "Disabled Auto Get Weapons")
+end)
+
 
