@@ -1,4 +1,4 @@
--- v1.9.19 - Only updates mastery stats after rebirth or startup, no stacking, instant debris pickup, all features
+-- v1.9.20 - Debris teleports directly INTO HRP (no offset), mastery only updates on rebirth/start, all features
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,7 +9,7 @@ local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deivi
 
 local Win = Library:CreateWindow({
     Title = "Auto Tycoon Bot",
-    Footer = "v1.9.19",
+    Footer = "v1.9.20",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true,
@@ -25,7 +25,7 @@ StatusLbl.TextWrapped = true
 StatusLbl.TextTruncate = Enum.TextTruncate.None
 
 local StatsBox = TabMain:AddRightGroupbox("Stats", "clipboard-list")
-local masteryLbls = {} -- for dynamic mastery display
+local masteryLbls = {}
 
 local ManaLbl = StatusBox:AddLabel("Mana: 0")
 local ButtonsLbl = StatusBox:AddLabel("Buttons unlocked: N/A")
@@ -53,7 +53,6 @@ local autoWpnRunning = false
 local char, hum, hrp
 local sizeLoopActive = false
 
--- Async refs for PlayerData and Mana
 local PlayerData, ManaVal
 
 local function notify(msg)
@@ -69,7 +68,6 @@ task.spawn(function()
         ManaVal = PlayerData:FindFirstChild("Mana")
         task.wait(0.1)
     until ManaVal
-    -- Initial mastery update at script startup
     updateMasteryLabels(getMasteryStr())
 end)
 
@@ -224,7 +222,7 @@ local function bringPartToPlayer(part)
     if not hrp or not part then return end
     part.CanCollide = false
     part.Massless = true
-    part.CFrame = hrp.CFrame * CFrame.new(0, 0, -2)
+    part.CFrame = hrp.CFrame
 end
 
 local function triggerPrompt(tgt)
@@ -256,15 +254,13 @@ local function getMasteryStr()
 end
 
 local function updateMasteryLabels(masteryStr)
-    -- Remove all old labels before adding new ones
     for _, lbl in ipairs(masteryLbls) do
         if lbl and typeof(lbl.Remove) == "function" then
             pcall(function() lbl:Remove() end)
         end
     end
     masteryLbls = {}
-    task.wait() -- allow destruction
-
+    task.wait()
     for line in masteryStr:gmatch("[^\n]+") do
         local lbl = StatsBox:AddLabel(line)
         lbl.TextYAlignment = Enum.TextYAlignment.Top
@@ -314,12 +310,9 @@ local function doRebirth()
 
     rebirthing = false
     altCollectZone()
-
-    -- Update mastery stats after rebirth only
     updateMasteryLabels(getMasteryStr())
 end
 
--- Weapon bring logic (example path)
 local spellStandPath = {"Map", "Tycoons", "dark776389", "F1_SpellStand_1"}
 local baseState, baseOrigCFrame = {}, {}
 
@@ -426,19 +419,16 @@ local function autoGetWeapon()
     end
 end
 
--- Debris pickup at/above/below player, instant
+-- Debris pickup directly inside HRP
 local function teleportDebrisParts()
     local debris = Workspace:FindFirstChild("Debris")
     if not debris or not hrp then return end
-    local offsets = {Vector3.new(0,2,0), Vector3.new(0,0,0), Vector3.new(0,-2,0)}
     for _, name in ipairs({"Premium_Manana", "Manana", "Purple_Crystal", "Blue_Crystal"}) do
         local part = debris:FindFirstChild(name)
         if part and part:IsA("BasePart") then
             part.CanCollide = false
             part.Massless = true
-            for _, v in ipairs(offsets) do
-                part.CFrame = hrp.CFrame + v
-            end
+            part.CFrame = hrp.CFrame
         end
     end
 end
@@ -473,8 +463,6 @@ task.spawn(function()
                     task.wait(0.05)
                     triggerPrompt(targ.inst)
                     StatusLbl:SetText("Activated: " .. targ.inst.Name)
-                else
-                    -- No periodic mastery update here!
                 end
             else
                 StatusLbl:SetText("Tycoon not found")
