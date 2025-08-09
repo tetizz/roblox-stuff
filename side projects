@@ -1,4 +1,4 @@
--- v1.9.29: faster weapon scan cooldown, version guard, auto rebirth, button/debris fixes, no anti-AFK
+-- v1.9.30: weapon pickup checks Backpack for real, version guard, fast cooldown, auto rebirth, debris/button fix, no anti-AFK
 
 -- Version guard to prevent multiple instances
 if getgenv().AutoTycoonRunning then
@@ -15,7 +15,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local TextService = game:GetService("TextService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
-
 local plr = Players.LocalPlayer
 
 local Library = loadstring(game:HttpGet(
@@ -24,7 +23,7 @@ local Library = loadstring(game:HttpGet(
 
 local Win = Library:CreateWindow({
     Title = "Auto Tycoon Bot",
-    Footer = "v1.9.29",
+    Footer = "v1.9.30",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
@@ -168,7 +167,7 @@ local function teleportDebrisParts()
     end
 end
 
--- Weapons optimized with faster cooldowns
+-- Weapons with true backpack check and optimized cooldowns
 local weaponCollectionCooldown = 0
 local collectedWeaponsCache = {}
 local function updateBackpackCache()
@@ -189,35 +188,44 @@ local function autoGetWeaponsOptimized()
         for _,stand in ipairs(tycoonModel:GetChildren()) do
             if stand:IsA("Model") and string.find(stand.Name,"SpellStand") then
                 local prompts={} for _,d in ipairs(stand:GetDescendants()) do if d:IsA("ProximityPrompt") then table.insert(prompts,d) end end
-                if #prompts<2 then continue end
+                if #prompts<1 then continue end
                 local weaponName
                 for _,prompt in ipairs(prompts) do if prompt.ActionText and prompt.ActionText~="" then weaponName=prompt.ActionText end end
-                if not weaponName or collectedWeaponsCache[weaponName] then continue end
-                -- Found missing weapon
-                local myPos=hrp.CFrame
+                if not weaponName then continue end
+                -- If we already have it, skip entirely
+                if plr.Backpack:FindFirstChild(weaponName) then continue end
+                -- Teleport to the stand
+                local originalPos=hrp.CFrame
                 local targetPart=prompts[1].Parent:IsA("BasePart") and prompts[1].Parent or prompts[1].Parent:FindFirstChildWhichIsA("BasePart")
                 if targetPart then hrp.CFrame=targetPart.CFrame * CFrame.new(0,0,-1) end
-                task.wait(0.05) -- faster
-                for _,prompt in ipairs(prompts) do
-                    if prompt and prompt:IsA("ProximityPrompt") then
-                        prompt.MaxActivationDistance=15; prompt.RequiresLineOfSight=false
-                        if prompt.Enabled then prompt:InputHoldBegin() task.wait(prompt.HoldDuration+0.05) prompt:InputHoldEnd() end
-                    end
-                    VirtualInputManager:SendKeyEvent(true,"E",false,game)
-                    task.wait(0.05)
-                    VirtualInputManager:SendKeyEvent(false,"E",false,game)
-                end
-                local startTime=tick()
-                repeat updateBackpackCache() if collectedWeaponsCache[weaponName] then break end task.wait(0.05)
-                until tick()-startTime > 2
-                hrp.CFrame=myPos
                 task.wait(0.05)
-                weaponCollectionCooldown = tick() + 0.3 -- lowered from 1s to 0.3s
+                -- Stay until weapon is in backpack or timeout
+                local startTime=tick()
+                while not plr.Backpack:FindFirstChild(weaponName) and tick()-startTime<3 do
+                    for _,prompt in ipairs(prompts) do
+                        if prompt and prompt:IsA("ProximityPrompt") then
+                            prompt.MaxActivationDistance=15; prompt.RequiresLineOfSight=false
+                            if prompt.Enabled then prompt:InputHoldBegin() task.wait(prompt.HoldDuration+0.05) prompt:InputHoldEnd() end
+                        end
+                        VirtualInputManager:SendKeyEvent(true,"E",false,game)
+                        task.wait(0.05)
+                        VirtualInputManager:SendKeyEvent(false,"E",false,game)
+                    end
+                    task.wait(0.05)
+                end
+                -- Weapon acquired OR timed out, teleport back
+                hrp.CFrame=originalPos
+                if plr.Backpack:FindFirstChild(weaponName) then
+                    weaponCollectionCooldown = tick() + 0.3
+                else
+                    weaponCollectionCooldown = tick() + 1
+                end
                 return
             end
         end
     end
-    weaponCollectionCooldown = tick() + 1 -- lowered from 3s to 1s when nothing missing
+    -- No missing weapons found, slow down further scans
+    weaponCollectionCooldown = tick() + 1
 end
 
 -- Rebirth
