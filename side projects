@@ -284,3 +284,4 @@ end))
 -- Toggles
 TogAutoBtn:OnChanged(function(v) running=v StatusLbl:SetText(v and "Enabled Auto Buttons" or "Disabled Auto Buttons") end)
 TogAutoWpn:OnChanged(function(v) autoWpnRunning=v StatusLbl:SetText(v and "Enabled Auto Get Weapons" or "Disabled Auto Get Weapons") end)
+
