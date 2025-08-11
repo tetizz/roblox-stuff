@@ -1,4 +1,4 @@
--- v1.0.0 classic: Manual enable, simple Obsidian GUI, Debris, Buttons, Rebirth
+-- Minimal Auto Tycoon: Auto Buttons + Debris + v1.9.27-style Auto Rebirth
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,46 +8,51 @@ local plr = Players.LocalPlayer
 
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local Window = Library:CreateWindow({
-    Title = "Auto Tycoon v1.0.0",
-    Footer = "",
+    Title = "Auto Tycoon v1.0.0+Rebirth",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
 })
 
-local MainTab = Window:AddTab("Main", "rocket")
+-- UI toggles
+local MainTab = Window:AddTab("Main", "home")
 local MainBox = MainTab:AddLeftGroupbox("Autofarm")
-local ToggleButtons = MainBox:AddToggle("AutoBtnToggle", {Text = "Auto Buttons", Default = false})
-local ToggleDebris  = MainBox:AddToggle("AutoDebrisToggle", {Text = "Auto Collect Debris", Default = false})
+local TglButtons = MainBox:AddToggle("AutoBtnToggle", {Text = "Auto Buttons", Default = false})
+local TglDebris  = MainBox:AddToggle("AutoDebrisToggle", {Text = "Auto Collect Debris", Default = false})
 
 local running = false
 local debrisOn = false
-local busy = false
-local rebirthCooldown = false
+local busy, rebirthing = false, false
+
+-- Rebirth state variables
+local rebirthStarted, rebirthCooldown = false, false
+local rebirthStartTime, rebirthEndTime
+local lastButtonValue, buttonPressCount = 0, 0
+local REBIRTH_COOLDOWN_TIME = 5 -- seconds
+
+-- Char bind
 local char, hrp
 if plr.Character then char = plr.Character hrp = char:WaitForChild("HumanoidRootPart") end
 plr.CharacterAdded:Connect(function(c) char = c hrp = c:WaitForChild("HumanoidRootPart") end)
 
+-- Helpers
 local function getMana()
-    local PlayerData = plr:FindFirstChild("PlayerData")
-    local ManaVal = PlayerData and PlayerData:FindFirstChild("Mana")
+    local PD = plr:FindFirstChild("PlayerData")
+    local ManaVal = PD and PD:FindFirstChild("Mana")
     return ManaVal and ManaVal.Value or 0
 end
-
 local function attrAnywhere(m, k)
     if m:GetAttribute(k) ~= nil then return true end
-    for _, d in ipairs(m:GetDescendants()) do
+    for _,d in ipairs(m:GetDescendants()) do
         if d:GetAttribute(k) ~= nil then return true end
     end
     return false
 end
-
 local function getBtnPos(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not m then return nil end
     return m.PrimaryPart and m.PrimaryPart.Position or m:GetPivot().Position
 end
-
 local function validBtn(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not (m and m:FindFirstChild("Button_Indicator", true)) then return false end
@@ -55,7 +60,6 @@ local function validBtn(inst)
     if getMana() < (inst:GetAttribute("UnlockCost") or math.huge) then return false end
     return getBtnPos(inst) ~= nil
 end
-
 local function gatherCands(root)
     local res = {}
     for _, inst in ipairs(root:GetDescendants()) do
@@ -63,7 +67,6 @@ local function gatherCands(root)
     end
     return res
 end
-
 local function bringBtnAndTrigger(inst)
     if not hrp then return end
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
@@ -71,21 +74,20 @@ local function bringBtnAndTrigger(inst)
         if p:IsA("BasePart") then p.CanCollide = false p.Massless = true end
     end
     m:PivotTo(hrp.CFrame * CFrame.new(0, 0, -2))
-    task.wait()
+    task.wait(0.05)
     local prompt = m:FindFirstChildOfClass("ProximityPrompt") or m:FindFirstChildWhichIsA("ProximityPrompt", true)
     if prompt then
-        prompt.MaxActivationDistance = 15
-        prompt.RequiresLineOfSight = false
+        prompt.MaxActivationDistance, prompt.RequiresLineOfSight = 15, false
         prompt:InputHoldBegin()
-        task.wait(prompt.HoldDuration + 0.01)
+        task.wait(prompt.HoldDuration + 0.05)
         prompt:InputHoldEnd()
-        VirtualInputManager:SendKeyEvent(true, "E", false, game)
-        task.wait()
-        VirtualInputManager:SendKeyEvent(false, "E", false, game)
+        VirtualInputManager:SendKeyEvent(true,"E",false,game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false,"E",false,game)
     end
 end
 
--- Debris Collector (classic types)
+-- Debris collector
 local function teleportDebrisParts()
     if not debrisOn or not hrp then return end
     local debris = Workspace:FindFirstChild("Debris")
@@ -95,29 +97,67 @@ local function teleportDebrisParts()
         if part and part:IsA("BasePart") then
             part.CanCollide, part.Massless = false, true
             part.CFrame = hrp.CFrame
-            task.wait()
+            task.wait(0.05)
             break
         end
     end
 end
 
--- Simple rebirth: when all buttons unlocked
-local function tryRebirth()
-    local bpObj = plr:FindFirstChild("ButtonProgress")
-    local unld = bpObj and bpObj:FindFirstChild("UnlockedButtons")
-    local tot  = bpObj and bpObj:FindFirstChild("TotalButtons")
-    if unld and tot and unld.Value == tot.Value and not rebirthCooldown then
-        rebirthCooldown = true
-        ReplicatedStorage:WaitForChild("RemoteEvents").RebirthCallback:InvokeServer(plr)
-        ReplicatedStorage.RemoteEvents.PickCallback:InvokeServer()
-        task.delay(5, function() rebirthCooldown = false end)
-    end
+-- Rebirth function
+local function doRebirth()
+    rebirthing = true
+    ReplicatedStorage:WaitForChild("RemoteEvents").RebirthCallback:InvokeServer(plr)
+    ReplicatedStorage.RemoteEvents.PickCallback:InvokeServer()
+    rebirthing = false
 end
 
--- Main loop
+-- Main loop with v1.9.27-style rebirth logic
 task.spawn(function()
     while true do
-        if running and not busy then
+        local bpObj = plr:FindFirstChild("ButtonProgress")
+        local unld = bpObj and bpObj:FindFirstChild("UnlockedButtons")
+        local tot  = bpObj and bpObj:FindFirstChild("TotalButtons")
+
+        if unld and tot then
+            -- Reset state after fresh rebirth
+            if unld.Value == 0 then
+                rebirthStarted = false
+                rebirthStartTime = nil
+                buttonPressCount = 0
+                lastButtonValue = 0
+                rebirthCooldown = false
+            end
+
+            -- Start tracking when first button pressed
+            if not rebirthStarted and unld.Value > 0 and not rebirthStartTime then
+                rebirthStartTime = tick()
+                rebirthStarted = true
+                buttonPressCount = 1
+                lastButtonValue = unld.Value
+            end
+
+            -- Track button presses
+            if rebirthStarted and unld.Value > lastButtonValue then
+                buttonPressCount += (unld.Value - lastButtonValue)
+                lastButtonValue = unld.Value
+            end
+
+            -- All buttons unlocked: do rebirth
+            if rebirthStarted and unld.Value == tot.Value and not rebirthCooldown then
+                rebirthCooldown = true
+                rebirthEndTime = tick()
+                rebirthStarted = false
+                rebirthStartTime, rebirthEndTime, lastButtonValue = nil, nil, 0
+                if running then
+                    doRebirth()
+                end
+                task.delay(REBIRTH_COOLDOWN_TIME, function() rebirthCooldown = false end)
+            end
+        end
+
+        teleportDebrisParts()
+
+        if running and not busy and not rebirthing then
             busy = true
             local tycoon = Workspace.Map and Workspace.Map:FindFirstChild("Tycoons") and Workspace.Map.Tycoons:FindFirstChild(plr.Name)
             if tycoon then
@@ -126,11 +166,10 @@ task.spawn(function()
             end
             busy = false
         end
-        teleportDebrisParts()
-        tryRebirth()
         task.wait(0.2)
     end
 end)
 
-ToggleButtons:OnChanged(function(v) running = v end)
-ToggleDebris:OnChanged(function(v) debrisOn = v end)
+-- UI toggle handlers
+TglButtons:OnChanged(function(v) running = v end)
+TglDebris:OnChanged(function(v) debrisOn = v end)
