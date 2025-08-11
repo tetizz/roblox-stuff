@@ -1,5 +1,5 @@
--- Auto Tycoon Script with Advanced Rebirth Logic and Element Pick by Mastery
--- Features: Auto Buttons + Auto Debris (OFF default) + Smart Auto Rebirth + Element Selection
+-- Auto Tycoon Script: Auto Buttons + Auto Debris (Multi‑grab) + Smart Rebirth + Lowest-Mastery Element Pick
+-- Both toggles OFF by default. Uses Obsidian UI.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,10 +7,10 @@ local Workspace = game:GetService("Workspace")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local plr = Players.LocalPlayer
 
--- For random tie break
+-- Seed RNG for tie-breaking
 math.randomseed(tick())
 
--- Load Obsidian UI library
+-- Load Obsidian library
 local Library = loadstring(game:HttpGet(
     "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"
 ))()
@@ -23,23 +23,24 @@ local Win = Library:CreateWindow({
 local Tab = Win:AddTab("Main", "home")
 local Controls = Tab:AddLeftGroupbox("Controls")
 local TglButtons = Controls:AddToggle("AutoBtns", {Text = "Auto Buttons", Default = false})
-local TglDebris  = Controls:AddToggle("AutoDebris", {Text = "Auto Collect Debris", Default = false})
+local TglDebris = Controls:AddToggle("AutoDebris", {Text = "Auto Collect Debris", Default = false})
 
--- Runtime Variables
+-- Runtime settings
 local running = false
 local debrisOn = false
 local busy = false
 local rebirthing = false
 
--- Rebirth State Tracking
+-- Rebirth state vars
 local rebirthStarted = false
 local rebirthCooldown = false
-local rebirthStartTime, rebirthEndTime
+local rebirthStartTime = nil
+local rebirthEndTime = nil
 local lastButtonValue = 0
 local buttonPressCount = 0
-local REBIRTH_COOLDOWN_TIME = 5 -- seconds cooldown
+local REBIRTH_COOLDOWN_TIME = 5
 
--- Character and HumanoidRootPart reference
+-- Character reference
 local char, hrp
 if plr.Character then
     char = plr.Character
@@ -50,7 +51,7 @@ plr.CharacterAdded:Connect(function(c)
     hrp = c:WaitForChild("HumanoidRootPart")
 end)
 
--- Utility functions
+--=== Utilities ===
 local function getMana()
     local PD = plr:FindFirstChild("PlayerData")
     local ManaVal = PD and PD:FindFirstChild("Mana")
@@ -82,7 +83,9 @@ end
 local function gatherCands(root)
     local res = {}
     for _, inst in ipairs(root:GetDescendants()) do
-        if validBtn(inst) then table.insert(res, inst) end
+        if validBtn(inst) then
+            table.insert(res, inst)
+        end
     end
     return res
 end
@@ -111,38 +114,35 @@ local function bringBtnAndTrigger(inst)
     end
 end
 
--- Debris Collector
+--=== Debris Collector (multi-grab) ===
 local function teleportDebrisParts()
     if not debrisOn or not hrp then return end
-    local debris = Workspace:FindFirstChild("Debris")
-    if not debris then return end
-    for _, name in ipairs({"Premium_Manana", "Manana", "Purple_Crystal", "Blue_Crystal"}) do
-        local part = debris:FindFirstChild(name)
-        if part and part:IsA("BasePart") then
+    local debrisFolder = Workspace:FindFirstChild("Debris")
+    if not debrisFolder then return end
+    for _, part in ipairs(debrisFolder:GetChildren()) do
+        if part:IsA("BasePart") and table.find({"Premium_Manana", "Manana", "Purple_Crystal", "Blue_Crystal"}, part.Name) then
             part.CanCollide = false
             part.Massless = true
             part.CFrame = hrp.CFrame
-            task.wait(0.05)
-            break
+            task.wait(0.02)
         end
     end
 end
 
--- doRebirth with mastery-based element pick
+--=== Rebirth Action ===
 local function doRebirth()
     rebirthing = true
     local repEv = ReplicatedStorage:WaitForChild("RemoteEvents")
 
     -- Trigger rebirth
     repEv.RebirthCallback:InvokeServer(plr)
-    task.wait(2) -- allow server state update before next calls
+    task.wait(2)
 
-    -- Select element that has the lowest mastery value
+    -- Select element with lowest mastery value (random tie-break)
     local masteryFolder = plr:WaitForChild("PlayerData"):FindFirstChild("Mastery")
     if masteryFolder then
         local lowestValue = math.huge
         local candidates = {}
-
         for _, elem in ipairs(masteryFolder:GetChildren()) do
             if typeof(elem.Value) == "number" then
                 if elem.Value < lowestValue then
@@ -153,33 +153,43 @@ local function doRebirth()
                 end
             end
         end
-
         if #candidates > 0 then
             local chosen = candidates[math.random(1, #candidates)]
-            print(string.format("[Auto Rebirth] Chose element '%s' (Mastery: %d)", chosen, lowestValue))
+            Library:Notify({
+                Title = "Auto Rebirth",
+                Description = string.format("Chose element '%s' (Mastery: %d)", chosen, lowestValue),
+                Time = 3
+            })
             repEv.ElementCallback:InvokeServer(chosen)
             repEv.PickCallback:InvokeServer()
         else
-            warn("[Auto Tycoon] No elements found in Mastery folder")
+            Library:Notify({
+                Title = "Auto Rebirth",
+                Description = "No mastery elements found!",
+                Time = 3
+            })
             repEv.PickCallback:InvokeServer()
         end
     else
-        warn("[Auto Tycoon] Mastery folder not found")
+        Library:Notify({
+            Title = "Auto Rebirth",
+            Description = "Mastery folder not found!",
+            Time = 3
+        })
         repEv.PickCallback:InvokeServer()
     end
 
     rebirthing = false
 end
 
--- Main loop: buttons farm, debris collect, rebirth detection
+--=== Main Loop ===
 task.spawn(function()
     while true do
         local bpObj = plr:FindFirstChild("ButtonProgress")
         local unld = bpObj and bpObj:FindFirstChild("UnlockedButtons")
-        local tot  = bpObj and bpObj:FindFirstChild("TotalButtons")
+        local tot = bpObj and bpObj:FindFirstChild("TotalButtons")
 
         if unld and tot then
-            -- Reset on new rebirth (buttons reset)
             if unld.Value == 0 then
                 rebirthStarted = false
                 rebirthStartTime = nil
@@ -187,34 +197,34 @@ task.spawn(function()
                 lastButtonValue = 0
                 rebirthCooldown = false
             end
-
-            -- Start tracking after first button unlocked
             if not rebirthStarted and unld.Value > 0 and not rebirthStartTime then
                 rebirthStartTime = tick()
                 rebirthStarted = true
                 buttonPressCount = 1
                 lastButtonValue = unld.Value
             end
-
-            -- Count button increments
             if rebirthStarted and unld.Value > lastButtonValue then
                 buttonPressCount += (unld.Value - lastButtonValue)
                 lastButtonValue = unld.Value
             end
-
-            -- Trigger rebirth when all buttons unlocked
             if rebirthStarted and unld.Value == tot.Value and not rebirthCooldown then
                 rebirthCooldown = true
                 rebirthEndTime = tick()
                 local duration = rebirthEndTime - (rebirthStartTime or rebirthEndTime)
-                print(string.format("[Auto Rebirth] Cycle complete in %.2fs (%d buttons)", duration, buttonPressCount))
+                Library:Notify({
+                    Title = "Auto Rebirth",
+                    Description = string.format("Cycle complete in %.2fs (%d buttons)", duration, buttonPressCount),
+                    Time = 3
+                })
                 rebirthStarted = false
                 rebirthStartTime, rebirthEndTime, lastButtonValue = nil, nil, 0
                 buttonPressCount = 0
                 if running then
                     doRebirth()
                 end
-                task.delay(REBIRTH_COOLDOWN_TIME, function() rebirthCooldown = false end)
+                task.delay(REBIRTH_COOLDOWN_TIME, function()
+                    rebirthCooldown = false
+                end)
             end
         end
 
@@ -234,10 +244,11 @@ task.spawn(function()
     end
 end)
 
--- UI event handlers
+--=== UI Toggle bindings ===
 TglButtons:OnChanged(function(v)
     running = v
 end)
 TglDebris:OnChanged(function(v)
     debrisOn = v
 end)
+
