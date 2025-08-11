@@ -1,4 +1,4 @@
--- Auto Tycoon Script: Auto Buttons + Auto Debris (Multi‑grab) + Smart Rebirth + Lowest-Mastery Element Pick
+-- Auto Tycoon Script: Auto Buttons + Auto Debris (Smart match) + Smart Rebirth + Lowest-Mastery Element Pick
 -- Both toggles OFF by default. Uses Obsidian UI.
 
 local Players = game:GetService("Players")
@@ -7,10 +7,9 @@ local Workspace = game:GetService("Workspace")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local plr = Players.LocalPlayer
 
--- Seed RNG for tie-breaking
-math.randomseed(tick())
+math.randomseed(tick()) -- random seed for tie-breaking
 
--- Load Obsidian library
+-- Load Obsidian UI library
 local Library = loadstring(game:HttpGet(
     "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"
 ))()
@@ -25,22 +24,20 @@ local Controls = Tab:AddLeftGroupbox("Controls")
 local TglButtons = Controls:AddToggle("AutoBtns", {Text = "Auto Buttons", Default = false})
 local TglDebris = Controls:AddToggle("AutoDebris", {Text = "Auto Collect Debris", Default = false})
 
--- Runtime settings
 local running = false
 local debrisOn = false
 local busy = false
 local rebirthing = false
 
--- Rebirth state vars
+-- Rebirth state
 local rebirthStarted = false
 local rebirthCooldown = false
-local rebirthStartTime = nil
-local rebirthEndTime = nil
+local rebirthStartTime, rebirthEndTime = nil, nil
 local lastButtonValue = 0
 local buttonPressCount = 0
 local REBIRTH_COOLDOWN_TIME = 5
 
--- Character reference
+-- Character & HRP
 local char, hrp
 if plr.Character then
     char = plr.Character
@@ -114,17 +111,21 @@ local function bringBtnAndTrigger(inst)
     end
 end
 
---=== Debris Collector (multi-grab) ===
+--=== Smart Debris Collector (crystal/manana anywhere in name) ===
 local function teleportDebrisParts()
     if not debrisOn or not hrp then return end
     local debrisFolder = Workspace:FindFirstChild("Debris")
     if not debrisFolder then return end
-    for _, part in ipairs(debrisFolder:GetChildren()) do
-        if part:IsA("BasePart") and table.find({"Premium_Manana", "Manana", "Purple_Crystal", "Blue_Crystal"}, part.Name) then
-            part.CanCollide = false
-            part.Massless = true
-            part.CFrame = hrp.CFrame
-            task.wait(0.02)
+    for _, obj in ipairs(debrisFolder:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local lowerName = string.lower(obj.Name)
+            if string.find(lowerName, "crystal") or string.find(lowerName, "manana") then
+                obj.Anchored = false
+                obj.CanCollide = false
+                obj.Massless = true
+                obj.CFrame = hrp.CFrame
+                task.wait(0.02)
+            end
         end
     end
 end
@@ -134,11 +135,9 @@ local function doRebirth()
     rebirthing = true
     local repEv = ReplicatedStorage:WaitForChild("RemoteEvents")
 
-    -- Trigger rebirth
     repEv.RebirthCallback:InvokeServer(plr)
-    task.wait(2)
+    task.wait(2) -- allow server state update
 
-    -- Select element with lowest mastery value (random tie-break)
     local masteryFolder = plr:WaitForChild("PlayerData"):FindFirstChild("Mastery")
     if masteryFolder then
         local lowestValue = math.huge
@@ -178,7 +177,6 @@ local function doRebirth()
         })
         repEv.PickCallback:InvokeServer()
     end
-
     rebirthing = false
 end
 
@@ -219,12 +217,8 @@ task.spawn(function()
                 rebirthStarted = false
                 rebirthStartTime, rebirthEndTime, lastButtonValue = nil, nil, 0
                 buttonPressCount = 0
-                if running then
-                    doRebirth()
-                end
-                task.delay(REBIRTH_COOLDOWN_TIME, function()
-                    rebirthCooldown = false
-                end)
+                if running then doRebirth() end
+                task.delay(REBIRTH_COOLDOWN_TIME, function() rebirthCooldown = false end)
             end
         end
 
@@ -239,16 +233,10 @@ task.spawn(function()
             end
             busy = false
         end
-
         task.wait(0.2)
     end
 end)
 
---=== UI Toggle bindings ===
-TglButtons:OnChanged(function(v)
-    running = v
-end)
-TglDebris:OnChanged(function(v)
-    debrisOn = v
-end)
-
+--=== UI Toggle Bindings ===
+TglButtons:OnChanged(function(v) running = v end)
+TglDebris:OnChanged(function(v) debrisOn = v end)
