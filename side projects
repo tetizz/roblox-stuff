@@ -1,5 +1,6 @@
 -- Auto Tycoon Script: Buttons + Smart Debris + Smart Rebirth + Lowest Mastery Element Pick + CollectZone Resize
--- Both feature toggles are OFF by default.
+-- Now: Buttons require RebirthReq <= your current Rebirth value
+-- Both toggles OFF by default.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -55,6 +56,15 @@ local function getMana()
     return ManaVal and ManaVal.Value or 0
 end
 
+local function getRebirths()
+    local PD = plr:FindFirstChild("PlayerData")
+    local rVal = PD and PD:FindFirstChild("Rebirth")
+    if rVal and typeof(rVal.Value) == "number" then
+        return rVal.Value
+    end
+    return 0
+end
+
 local function attrAnywhere(m, k)
     if m:GetAttribute(k) ~= nil then return true end
     for _, d in ipairs(m:GetDescendants()) do
@@ -69,12 +79,13 @@ local function getBtnPos(inst)
     return m.PrimaryPart and m.PrimaryPart.Position or m:GetPivot().Position
 end
 
--- Only includes buttons that have a RebirthReq attribute truthy and are affordable
+-- Only includes buttons that have RebirthReq <= your current Rebirths and are affordable
 local function validBtn(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not (m and m:FindFirstChild("Button_Indicator", true)) then return false end
     local rebirthReq = m:GetAttribute("RebirthReq")
-    if rebirthReq == nil or rebirthReq == false or rebirthReq == 0 then return false end
+    if type(rebirthReq) ~= "number" then return false end
+    if rebirthReq > getRebirths() then return false end
     if getMana() < (inst:GetAttribute("UnlockCost") or math.huge) then return false end
     return getBtnPos(inst) ~= nil
 end
@@ -113,7 +124,7 @@ local function bringBtnAndTrigger(inst)
     end
 end
 
--- === Smart Debris Collector: Collect any with "crystal" or "manana" ===
+-- === Smart Debris Collector: Match any "crystal" or "manana" ===
 local function teleportDebrisParts()
     if not debrisOn or not hrp then return end
     local debrisFolder = Workspace:FindFirstChild("Debris")
@@ -136,11 +147,9 @@ end
 local function resizeAllCollectZones()
     local tycoonsFolder = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Tycoons")
     if not tycoonsFolder then return end
-
     local baseSize = Vector3.new(2000, 2000, 2000)
     local delta = Vector3.new(1, 1, 1)
     local flip = false
-
     task.spawn(function()
         while true do
             for _, tycoon in ipairs(tycoonsFolder:GetChildren()) do
@@ -148,11 +157,7 @@ local function resizeAllCollectZones()
                     and tycoon.TycoonTemplate:FindFirstChild("T_Collect_Zone")
                     and tycoon.TycoonTemplate.T_Collect_Zone:FindFirstChild("CollectZone")
                 if cz and cz:IsA("BasePart") then
-                    if flip then
-                        cz.Size = baseSize - delta
-                    else
-                        cz.Size = baseSize + delta
-                    end
+                    cz.Size = flip and (baseSize - delta) or (baseSize + delta)
                 end
             end
             flip = not flip
@@ -166,10 +171,8 @@ resizeAllCollectZones()
 local function doRebirth()
     rebirthing = true
     local repEv = ReplicatedStorage:WaitForChild("RemoteEvents")
-
     repEv.RebirthCallback:InvokeServer(plr)
     task.wait(2)
-
     local masteryFolder = plr:WaitForChild("PlayerData"):FindFirstChild("Mastery")
     if masteryFolder then
         local lowestValue = math.huge
@@ -218,7 +221,6 @@ task.spawn(function()
         local bpObj = plr:FindFirstChild("ButtonProgress")
         local unld = bpObj and bpObj:FindFirstChild("UnlockedButtons")
         local tot = bpObj and bpObj:FindFirstChild("TotalButtons")
-
         if unld and tot then
             if unld.Value == 0 then
                 rebirthStarted = false
@@ -253,9 +255,7 @@ task.spawn(function()
                 task.delay(REBIRTH_COOLDOWN_TIME, function() rebirthCooldown = false end)
             end
         end
-
         teleportDebrisParts()
-
         if running and not busy and not rebirthing then
             busy = true
             local tycoon = Workspace.Map and Workspace.Map:FindFirstChild("Tycoons") and Workspace.Map.Tycoons:FindFirstChild(plr.Name)
@@ -272,3 +272,4 @@ end)
 -- UI bindings
 TglButtons:OnChanged(function(v) running = v end)
 TglDebris:OnChanged(function(v) debrisOn = v end)
+
