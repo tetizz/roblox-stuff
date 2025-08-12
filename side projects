@@ -1,6 +1,6 @@
 -- Auto Tycoon Script: Auto Buttons + Smart Debris + Smart Rebirth (Mastery ≥ 0) + Player-only CollectZone Resize (Toggleable)
 -- Buttons require RebirthReq <= your current Rebirth value
--- All main features OFF by default
+-- All features OFF by default
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -40,7 +40,7 @@ local lastButtonValue = 0
 local buttonPressCount = 0
 local REBIRTH_COOLDOWN_TIME = 5
 
--- Character / HRP
+-- Character / HRP references
 local char, hrp
 if plr.Character then
     char = plr.Character
@@ -73,7 +73,7 @@ local function getBtnPos(inst)
     return m.PrimaryPart and m.PrimaryPart.Position or m:GetPivot().Position
 end
 
--- Button validity
+-- AutoButton validity
 local function validBtn(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not (m and m:FindFirstChild("Button_Indicator", true)) then return false end
@@ -160,8 +160,9 @@ local function resizeMyCollectZone()
         while collectResizerOn do
             myTycoon = Workspace.Map.Tycoons:FindFirstChild(plr.Name)
             if myTycoon then
-                local cz = myTycoon:FindFirstChild("T_Collect_Zone")
-                    and myTycoon.T_Collect_Zone:FindFirstChild("CollectZone")
+                local cz = myTycoon:FindFirstChild("TycoonTemplate")
+                    and myTycoon.TycoonTemplate:FindFirstChild("T_Collect_Zone")
+                    and myTycoon.TycoonTemplate.T_Collect_Zone:FindFirstChild("CollectZone")
                 if cz and cz:IsA("BasePart") then
                     cz.Size = flip and (baseSize - delta) or (baseSize + delta)
                 end
