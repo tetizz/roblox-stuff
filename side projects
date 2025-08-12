@@ -1,7 +1,6 @@
--- Auto Tycoon Script: Buttons + Smart Debris + Smart Rebirth + Lowest Mastery Element Pick + CollectZone Resize
+-- Auto Tycoon Script: Buttons + Smart Debris + Smart Rebirth + Lowest Mastery ≥ 0 + CollectZone Resize (restarts after each rebirth)
 -- Buttons require RebirthReq <= your current Rebirth value
--- Element auto-pick ignores mastery values < 0
--- Both toggles OFF by default
+-- Both toggles OFF by default.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -138,19 +137,20 @@ end
 
 -- === Auto-resize all CollectZones ===
 local function resizeAllCollectZones()
-    local tycoonsFolder = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Tycoons")
-    if not tycoonsFolder then return end
-    local baseSize = Vector3.new(2000, 2000, 2000)
-    local delta = Vector3.new(1, 1, 1)
-    local flip = false
     task.spawn(function()
+        local baseSize = Vector3.new(2000, 2000, 2000)
+        local delta = Vector3.new(1, 1, 1)
+        local flip = false
         while true do
-            for _, tycoon in ipairs(tycoonsFolder:GetChildren()) do
-                local cz = tycoon:FindFirstChild("TycoonTemplate")
-                    and tycoon.TycoonTemplate:FindFirstChild("T_Collect_Zone")
-                    and tycoon.TycoonTemplate.T_Collect_Zone:FindFirstChild("CollectZone")
-                if cz and cz:IsA("BasePart") then
-                    cz.Size = flip and (baseSize - delta) or (baseSize + delta)
+            local tycoonsFolder = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Tycoons")
+            if tycoonsFolder then
+                for _, tycoon in ipairs(tycoonsFolder:GetChildren()) do
+                    local cz = tycoon:FindFirstChild("TycoonTemplate")
+                        and tycoon.TycoonTemplate:FindFirstChild("T_Collect_Zone")
+                        and tycoon.TycoonTemplate.T_Collect_Zone:FindFirstChild("CollectZone")
+                    if cz and cz:IsA("BasePart") then
+                        cz.Size = flip and (baseSize - delta) or (baseSize + delta)
+                    end
                 end
             end
             flip = not flip
@@ -173,7 +173,7 @@ local function doRebirth()
         local lowestValue = math.huge
         local candidates = {}
         for _, elem in ipairs(masteryFolder:GetChildren()) do
-            if typeof(elem.Value) == "number" and elem.Value >= 0 then -- ✅ skip negatives
+            if typeof(elem.Value) == "number" and elem.Value >= 0 then -- skip negatives
                 if elem.Value < lowestValue then
                     lowestValue = elem.Value
                     candidates = {elem.Name}
@@ -207,6 +207,10 @@ local function doRebirth()
         })
         repEv.PickCallback:InvokeServer()
     end
+
+    -- Restart CollectZone resizer after rebirth finishes
+    resizeAllCollectZones()
+
     rebirthing = false
 end
 
@@ -255,7 +259,7 @@ task.spawn(function()
 
         if running and not busy and not rebirthing then
             busy = true
-            local tycoon = Workspace.Map and Workspace.Map:FindFirstChild("Tycoons") 
+            local tycoon = Workspace.Map and Workspace.Map:FindFirstChild("Tycoons")
                            and Workspace.Map.Tycoons:FindFirstChild(plr.Name)
             if tycoon then
                 local cands = gatherCands(tycoon)
