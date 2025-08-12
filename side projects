@@ -1,4 +1,4 @@
--- Auto Tycoon Script: Buttons + Smart Debris + Smart Rebirth + Lowest Mastery ≥ 0 + Player-only CollectZone Resize
+-- Auto Tycoon Script: Auto Buttons + Smart Debris + Smart Rebirth (Mastery ≥ 0) + Player-only CollectZone Resize
 -- Buttons require RebirthReq <= your current Rebirth value
 -- Both toggles OFF by default.
 
@@ -38,7 +38,7 @@ local lastButtonValue = 0
 local buttonPressCount = 0
 local REBIRTH_COOLDOWN_TIME = 5
 
--- Setup HRP references
+-- HRP reference
 local char, hrp
 if plr.Character then
     char = plr.Character
@@ -158,7 +158,8 @@ local function resizeMyCollectZone()
     end)
 end
 
-resizeMyCollectZone() -- Start once at script launch
+-- Start the resizer immediately upon script load
+resizeMyCollectZone()
 
 -- === Rebirth Action ===
 local function doRebirth()
@@ -208,7 +209,7 @@ local function doRebirth()
         repEv.PickCallback:InvokeServer()
     end
 
-    -- 🔄 Restart my CollectZone resizer after rebirth
+    -- Restart my CollectZone resizer after rebirth
     resizeMyCollectZone()
 
     rebirthing = false
