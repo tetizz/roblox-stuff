@@ -1,4 +1,4 @@
--- Auto Tycoon Script: Auto Buttons + Smart Debris + Smart Rebirth (Mastery ≥ 0) + Player-only CollectZone Resize (Toggleable)
+-- Auto Tycoon Script: Auto Buttons + Smart Debris + Smart Rebirth (Mastery ≥ 0) + Player-only CollectZone Resize (Toggleable, fixed path)
 -- Buttons require RebirthReq <= your current Rebirth value
 -- All features OFF by default
 
@@ -10,7 +10,7 @@ local plr = Players.LocalPlayer
 
 math.randomseed(tick())
 
--- Load Obsidian UI
+-- === Load Obsidian UI ===
 local Library = loadstring(game:HttpGet(
     "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"
 ))()
@@ -26,6 +26,7 @@ local TglButtons = Controls:AddToggle("AutoBtns", {Text = "Auto Buttons", Defaul
 local TglDebris = Controls:AddToggle("AutoDebris", {Text = "Auto Collect Debris", Default = false})
 local TglCollect = Controls:AddToggle("AutoCollectResize", {Text = "CollectZone Resizer", Default = false})
 
+-- === State Vars ===
 local running = false
 local debrisOn = false
 local collectResizerOn = false
@@ -35,12 +36,12 @@ local rebirthing = false
 -- Rebirth state
 local rebirthStarted = false
 local rebirthCooldown = false
-local rebirthStartTime, rebirthEndTime
+local rebirthStartTime
 local lastButtonValue = 0
 local buttonPressCount = 0
 local REBIRTH_COOLDOWN_TIME = 5
 
--- Character / HRP references
+-- Character refs
 local char, hrp
 if plr.Character then
     char = plr.Character
@@ -73,7 +74,7 @@ local function getBtnPos(inst)
     return m.PrimaryPart and m.PrimaryPart.Position or m:GetPivot().Position
 end
 
--- AutoButton validity
+-- === Auto Button validation ===
 local function validBtn(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not (m and m:FindFirstChild("Button_Indicator", true)) then return false end
@@ -135,7 +136,7 @@ local function teleportDebrisParts()
     end
 end
 
--- === Toggleable Player-only CollectZone Resizer ===
+-- === Toggleable Player-only CollectZone Resizer (fixed exact path) ===
 local collectResizerThread
 local function resizeMyCollectZone()
     if collectResizerThread then
@@ -145,7 +146,7 @@ local function resizeMyCollectZone()
     if not collectResizerOn then return end
 
     collectResizerThread = task.spawn(function()
-        -- Wait until tycoon exists
+        -- Wait until your specific tycoon exists
         local myTycoon
         repeat
             task.wait(0.2)
@@ -160,9 +161,8 @@ local function resizeMyCollectZone()
         while collectResizerOn do
             myTycoon = Workspace.Map.Tycoons:FindFirstChild(plr.Name)
             if myTycoon then
-                local cz = myTycoon:FindFirstChild("TycoonTemplate")
-                    and myTycoon.TycoonTemplate:FindFirstChild("T_Collect_Zone")
-                    and myTycoon.TycoonTemplate.T_Collect_Zone:FindFirstChild("CollectZone")
+                local cz = myTycoon:FindFirstChild("T_Collect_Zone")
+                    and myTycoon.T_Collect_Zone:FindFirstChild("CollectZone")
                 if cz and cz:IsA("BasePart") then
                     cz.Size = flip and (baseSize - delta) or (baseSize + delta)
                 end
@@ -220,7 +220,7 @@ local function doRebirth()
         repEv.PickCallback:InvokeServer()
     end
 
-    -- Restart resizer if toggle is ON
+    -- 🔄 Restart resizer if toggle is ON
     if collectResizerOn then resizeMyCollectZone() end
 
     rebirthing = false
@@ -253,14 +253,14 @@ task.spawn(function()
             end
             if rebirthStarted and unld.Value == tot.Value and not rebirthCooldown then
                 rebirthCooldown = true
-                rebirthEndTime = tick()
                 Library:Notify({
                     Title = "Auto Rebirth",
-                    Description = string.format("Cycle complete in %.2fs (%d buttons)", rebirthEndTime - (rebirthStartTime or rebirthEndTime), buttonPressCount),
+                    Description = string.format("Cycle complete in %.2fs (%d buttons)", tick() - (rebirthStartTime or tick()), buttonPressCount),
                     Time = 3
                 })
                 rebirthStarted = false
-                rebirthStartTime, rebirthEndTime, lastButtonValue = nil, nil, 0
+                rebirthStartTime = nil
+                lastButtonValue = 0
                 buttonPressCount = 0
                 if running then doRebirth() end
                 task.delay(REBIRTH_COOLDOWN_TIME, function() rebirthCooldown = false end)
