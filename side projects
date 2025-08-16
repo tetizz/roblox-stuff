@@ -1,18 +1,15 @@
--- Auto Tycoon Script with Rebirth Timing and ETA Slider, Fully Integrated
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local plr = Players.LocalPlayer
 
+math.randomseed(tick())
+
+-- Load Obsidian UI
 local Library = loadstring(game:HttpGet(
     "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"
 ))()
-
-math.randomseed(tick())
-
--- === UI Setup ===
 local Win = Library:CreateWindow({
     Title = "Auto Tycoon with Smart Rebirth + ETA",
     ToggleKeybind = Enum.KeyCode.RightControl,
@@ -21,222 +18,120 @@ local Win = Library:CreateWindow({
 })
 local Tab = Win:AddTab("Main", "home")
 local Controls = Tab:AddLeftGroupbox("Controls")
-local TglButtons = Controls:AddToggle("AutoBtns", {Text = "Auto Buttons", Default = true})
-local TglDebris = Controls:AddToggle("AutoDebris", {Text = "Auto Collect Debris", Default = true})
-local TglCollect = Controls:AddToggle("AutoCollectResize", {Text = "CollectZone Resizer", Default = true})
-local TglWeather = Controls:AddToggle("AutoWeather", {Text = "Auto Weather", Default = true})
+local StatsPanel = Tab:AddLeftGroupbox("Rebirth & ETA")
 
--- Add Rebirth Stats Panel
-local StatsPanel = Tab:AddLeftGroupbox("Rebirth Timing & ETA")
+local TglButtons = Controls:AddToggle("AutoBtns", {Text = "Auto Buttons", Default = false})
+local TglDebris = Controls:AddToggle("AutoDebris", {Text = "Auto Collect Debris", Default = false})
+local TglCollect = Controls:AddToggle("AutoCollectResize", {Text = "CollectZone Resizer", Default = false})
+local TglWeather = Controls:AddToggle("AutoWeather", {Text = "Auto Weather Skip", Default = false})
 
-local AvgTimeLabel = StatsPanel:AddLabel("Average Rebirth Time: Calculating...")
+-- Stats UI
+local AvgTimeLabel = StatsPanel:AddLabel("Average Rebirth: Calculating...")
 local TargetSlider = StatsPanel:AddSlider("TargetRebirth", {
     Text = "Target Rebirth",
-    Default = plr.PlayerData.Rebirth.Value + 1,
-    Min = plr.PlayerData.Rebirth.Value + 1,
-    Max = plr.PlayerData.Rebirth.Value + 500,
+    Default = 1,
+    Min = 1,
+    Max = 1000,
     Rounding = 1
 })
-local ETALabel = StatsPanel:AddLabel("ETA to Target: Calculating...")
+local ETALabel = StatsPanel:AddLabel("ETA: Calculating...")
 
--- === State Vars ===
-local running = true
-local debrisOn = true
-local collectResizerOn = true
-local autoWeatherOn = true
-local busy = false
-local rebirthing = false
+-- State vars
+local running, debrisOn, collectResizerOn, autoWeatherOn = false, false, false, false
+local busy, rebirthing = false, false
 
--- Timing and rebirth tracking
+-- Rebirth timing tracking
 local MAX_REBIRTH_HISTORY = 10
-local rebirthData = {}   -- stores last 10 rebirth cycles: { totalTime, buttonTimes }
-local currentCycle = {
-    startTime = nil,
-    lastButtonTime = nil,
-    lastButtonCount = 0,
-    buttonTimes = {}
-}
+local rebirthData = {}
+local currentCycle = { startTime = nil, totalTime = 0 }
 
--- Utility function to format seconds as "Xm YYs"
 local function formatTime(seconds)
     local m = math.floor(seconds / 60)
     local s = math.floor(seconds % 60)
     return string.format("%dm %02ds", m, s)
 end
-
--- Average across last 10 rebirths
 local function getAverageRebirthTime()
-    local sum, count = 0, 0
-    for _, cycle in ipairs(rebirthData) do
-        if cycle.totalTime then
-            sum = sum + cycle.totalTime
-            count = count + 1
-        end
+    local sum, ct = 0, 0
+    for _, v in ipairs(rebirthData) do
+        if v.totalTime then sum = sum + v.totalTime; ct = ct + 1 end
     end
-    if count == 0 then return nil end
-    return sum / count
+    if ct == 0 then return nil end
+    return sum / ct
 end
-
--- Average time for a button across last 10 rebirths
-local function getAverageButtonTime(buttonName)
-    local sum, count = 0, 0
-    for _, cycle in ipairs(rebirthData) do
-        local t = cycle.buttonTimes[buttonName]
-        if t then
-            sum = sum + t
-            count = count + 1
-        end
-    end
-    if count == 0 then return nil end
-    return sum / count
-end
-
--- Current target rebirth from slider
-local targetRebirth = TargetSlider.Value
 
 local function updateStatsUI()
     local avgRebirth = getAverageRebirthTime()
     if avgRebirth then
-        AvgTimeLabel:SetText("Average Rebirth Time: " .. formatTime(avgRebirth))
+        AvgTimeLabel:SetText("Average Rebirth: " .. formatTime(avgRebirth))
     else
-        AvgTimeLabel:SetText("Average Rebirth Time: Calculating...")
+        AvgTimeLabel:SetText("Average Rebirth: Calculating...")
     end
-
-    local currentRebirth = plr.PlayerData.Rebirth.Value or 0
-    if targetRebirth < currentRebirth + 1 then
-        targetRebirth = currentRebirth + 1
-        TargetSlider:SetValue(targetRebirth)
+    local rebirthVal = plr:FindFirstChild("PlayerData") and plr.PlayerData:FindFirstChild("Rebirth")
+    local cur = (rebirthVal and rebirthVal.Value) or 0
+    TargetSlider:SetMin(cur + 1)
+    local tVal = TargetSlider.Value
+    if tVal < cur + 1 then
+        TargetSlider:SetValue(cur + 1)
     end
-
     if avgRebirth then
-        local rebirthsLeft = math.max(0, targetRebirth - currentRebirth)
-        local etaSeconds = rebirthsLeft * avgRebirth
-        -- convert etaSeconds to h m format
-        local h = math.floor(etaSeconds / 3600)
-        local m = math.floor((etaSeconds % 3600) / 60)
+        local left = math.max(0, TargetSlider.Value - cur)
+        local etaSec = left * avgRebirth
+        local h = math.floor(etaSec / 3600)
+        local m = math.floor((etaSec % 3600) / 60)
         local etaText = (h > 0 and string.format("%dh ", h) or "") .. string.format("%dm", m)
-        ETALabel:SetText("ETA to Target: " .. etaText)
+        ETALabel:SetText("ETA: " .. etaText)
     else
-        ETALabel:SetText("ETA to Target: Calculating...")
+        ETALabel:SetText("ETA: Calculating...")
     end
 end
+TargetSlider:OnChanged(function() updateStatsUI() end)
 
-TargetSlider:OnChanged(function(val)
-    targetRebirth = val
-    updateStatsUI()
-end)
-
--- === Timing Tracking Hooks ===
-
--- Called when UnlockedButtons goes 0 -> 1: start new rebirth cycle
-local function startCycle()
-    currentCycle.startTime = tick()
-    currentCycle.lastButtonTime = currentCycle.startTime
-    currentCycle.lastButtonCount = 1
-    currentCycle.buttonTimes = {}
-    print("[Cycle] Started new rebirth cycle at " .. os.date("%X"))
+-- Utility functions
+local function getMana()
+    local PD = plr:FindFirstChild("PlayerData")
+    local ManaVal = PD and PD:FindFirstChild("Mana")
+    return ManaVal and ManaVal.Value or 0
 end
-
--- Called when UnlockedButtons increases, record time for that button
-local function logButtonPress(buttonName, newCount)
-    local now = tick()
-    if currentCycle.lastButtonTime then
-        local elapsed = now - currentCycle.lastButtonTime
-        currentCycle.buttonTimes[buttonName] = elapsed
-        print(string.format("[Button] Pressed %s took %.2f seconds", buttonName, elapsed))
-    end
-    currentCycle.lastButtonTime = now
-    currentCycle.lastButtonCount = newCount
+local function getRebirths()
+    local PD = plr:FindFirstChild("PlayerData")
+    local rVal = PD and PD:FindFirstChild("Rebirth")
+    return (rVal and typeof(rVal.Value) == "number") and rVal.Value or 0
 end
-
--- Called on rebirth completion: finalize and save timing data
-local function endCycle()
-    if not currentCycle.startTime then return end
-
-    local totalTime = tick() - currentCycle.startTime
-    print(string.format("[Cycle] Rebirth cycle ended. Total time: %.2f seconds", totalTime))
-
-    table.insert(rebirthData, {
-        totalTime = totalTime,
-        buttonTimes = currentCycle.buttonTimes
-    })
-
-    if #rebirthData > MAX_REBIRTH_HISTORY then
-        table.remove(rebirthData, 1)
-    end
-
-    currentCycle.startTime = nil
-    currentCycle.lastButtonTime = nil
-    currentCycle.lastButtonCount = 0
-    currentCycle.buttonTimes = {}
-
-    updateStatsUI()
+local function getBtnPos(inst)
+    local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
+    if not m then return nil end
+    return m.PrimaryPart and m.PrimaryPart.Position or m:GetPivot().Position
 end
-
--- === Connect to UnlockedButtons changes ===
-local unlockedButtons = plr.ButtonProgress:WaitForChild("UnlockedButtons")
-local lastUnlockedValue = unlockedButtons.Value or 0
-
-unlockedButtons:GetPropertyChangedSignal("Value"):Connect(function()
-    local val = unlockedButtons.Value
-
-    -- Detect cycle start: going from 0 to 1
-    if val == 1 and lastUnlockedValue == 0 then
-        startCycle()
-    end
-
-    -- Log button press when value increments
-    if currentCycle.startTime and val > lastUnlockedValue then
-        local buttonName = "Button_" .. tostring(val)
-        logButtonPress(buttonName, val)
-    end
-
-    -- Detect cycle end: going from >0 to 0
-    if val == 0 and lastUnlockedValue > 0 then
-        endCycle()
-    end
-
-    lastUnlockedValue = val
-end)
-
--- === Auto Buttons ===
 local function validBtn(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not (m and m:FindFirstChild("Button_Indicator", true)) then return false end
     local rebirthReq = m:GetAttribute("RebirthReq")
     if type(rebirthReq) ~= "number" then return false end
-    if rebirthReq > (plr.PlayerData.Rebirth.Value or 0) then return false end
-    if (plr.PlayerData.Mana and plr.PlayerData.Mana.Value or 0) < (inst:GetAttribute("UnlockCost") or math.huge) then return false end
-    local pos = m.PrimaryPart and m.PrimaryPart.Position or m:GetPivot().Position
-    return pos ~= nil
+    if rebirthReq > getRebirths() then return false end
+    if getMana() < (inst:GetAttribute("UnlockCost") or math.huge) then return false end
+    return getBtnPos(inst) ~= nil
 end
-
 local function gatherCands(root)
     local res = {}
     for _, inst in ipairs(root:GetDescendants()) do
-        if validBtn(inst) then
-            table.insert(res, inst)
-        end
+        if validBtn(inst) then table.insert(res, inst) end
     end
     return res
 end
-
-local hrp = nil
+local char, hrp
 if plr.Character then
-    hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+    char = plr.Character
+    hrp = char:WaitForChild("HumanoidRootPart")
 end
 plr.CharacterAdded:Connect(function(c)
+    char = c
     hrp = c:WaitForChild("HumanoidRootPart")
 end)
-
 local function bringBtnAndTrigger(inst)
     if not hrp then return end
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     for _, p in ipairs(m:GetDescendants()) do
-        if p:IsA("BasePart") then
-            p.CanCollide = false
-            p.Massless = true
-        end
+        if p:IsA("BasePart") then p.CanCollide = false; p.Massless = true end
     end
     m:PivotTo(hrp.CFrame * CFrame.new(0, 0, -2))
     task.wait(0.05)
@@ -253,7 +148,7 @@ local function bringBtnAndTrigger(inst)
     end
 end
 
--- === Smart Debris ===
+-- Auto Debris Collector
 local function teleportDebrisParts()
     if not debrisOn or not hrp then return end
     local debrisFolder = Workspace:FindFirstChild("Debris")
@@ -273,7 +168,28 @@ local function teleportDebrisParts()
     end
 end
 
--- === CollectZone Resizer (deep search) ===
+-- Weather Skipper
+local function skipWeatherEvent()
+    if not autoWeatherOn then return end
+    local evObj = Players:FindFirstChild("Event_Values")
+    if evObj then
+        local timer = evObj:FindFirstChild("Timer")
+        local eventName = evObj:FindFirstChild("EventDisplayName")
+        if timer and timer.Value > 0 then
+            local remote = ReplicatedStorage:WaitForChild("RemoteEvents"):FindFirstChild("SkipEvent")
+            if remote then
+                remote:FireServer()
+                Library:Notify({
+                    Title = "Auto Weather Skip",
+                    Description = string.format("Skipped weather: %s (%d seconds left)", eventName and eventName.Value or "Unknown", timer.Value),
+                    Time = 3
+                })
+            end
+        end
+    end
+end
+
+-- CollectZone Resizer
 local collectResizerThread
 local function resizeMyCollectZone()
     if collectResizerThread then
@@ -281,7 +197,6 @@ local function resizeMyCollectZone()
         collectResizerThread = nil
     end
     if not collectResizerOn then return end
-
     collectResizerThread = task.spawn(function()
         local myTycoon
         repeat
@@ -289,22 +204,14 @@ local function resizeMyCollectZone()
             local tf = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Tycoons")
             myTycoon = tf and tf:FindFirstChild(plr.Name)
         until myTycoon
-
         local baseSize = Vector3.new(2000, 2000, 2000)
         local delta = Vector3.new(1, 1, 1)
         local flip = false
-
         while collectResizerOn do
             myTycoon = Workspace.Map.Tycoons:FindFirstChild(plr.Name)
             if myTycoon then
-                local cz
-                for _, d in ipairs(myTycoon:GetDescendants()) do
-                    if d:IsA("BasePart") and d.Name == "CollectZone" then
-                        cz = d
-                        break
-                    end
-                end
-                if cz then
+                local cz = myTycoon:FindFirstChild("T_Collect_Zone") and myTycoon.T_Collect_Zone:FindFirstChild("CollectZone")
+                if cz and cz:IsA("BasePart") then
                     cz.Size = flip and (baseSize - delta) or (baseSize + delta)
                 end
             end
@@ -314,14 +221,12 @@ local function resizeMyCollectZone()
     end)
 end
 
--- === Rebirth Function with integrated endCycle call ===
-local rebirthCooldown = false
+-- Rebirth logic + logging for ETA stats
 local function doRebirth()
     rebirthing = true
     local repEv = ReplicatedStorage:WaitForChild("RemoteEvents")
     repEv.RebirthCallback:InvokeServer(plr)
     task.wait(2)
-
     local masteryFolder = plr:WaitForChild("PlayerData"):FindFirstChild("Mastery")
     if masteryFolder then
         local lowestValue = math.huge
@@ -346,75 +251,88 @@ local function doRebirth()
             repEv.ElementCallback:InvokeServer(chosen)
             repEv.PickCallback:InvokeServer()
         else
-            Library:Notify({Title = "Auto Rebirth", Description = "No mastery elements ≥ 0 found!", Time = 3})
+            Library:Notify({
+                Title = "Auto Rebirth",
+                Description = "No mastery elements ≥ 0 found!",
+                Time = 3
+            })
             repEv.PickCallback:InvokeServer()
         end
     else
-        Library:Notify({Title = "Auto Rebirth", Description = "Mastery folder not found!", Time = 3})
+        Library:Notify({
+            Title = "Auto Rebirth",
+            Description = "Mastery folder not found!",
+            Time = 3
+        })
         repEv.PickCallback:InvokeServer()
     end
-
     if collectResizerOn then resizeMyCollectZone() end
     rebirthing = false
-
-    -- Call endCycle here to log the rebirth completion timing
-    endCycle()
 end
 
--- === Main Loop ===
+-- Rebirth tracking logic (cycle, average, eta, etc)
+local rebirthStarted, rebirthStartTime, lastButtonValue, buttonPressCount = false, nil, 0, 0
+local REBIRTH_COOLDOWN_TIME = 5
+local rebirthCooldown = false
+
 task.spawn(function()
     while true do
-        if running and not busy and not rebirthing then
-            busy = true
-
-            local myTycoon = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Tycoons") and Workspace.Map.Tycoons:FindFirstChild(plr.Name)
-            if myTycoon then
-                local cands = gatherCands(myTycoon)
-                if #cands > 0 then
-                    bringBtnAndTrigger(cands)
-                end
+        local bpObj = plr:FindFirstChild("ButtonProgress")
+        local unld = bpObj and bpObj:FindFirstChild("UnlockedButtons")
+        local tot = bpObj and bpObj:FindFirstChild("TotalButtons")
+        if unld and tot then
+            if unld.Value == 0 then
+                rebirthStarted = false
+                rebirthStartTime = nil
+                buttonPressCount = 0
+                lastButtonValue = 0
+                rebirthCooldown = false
             end
-
-            local bpObj = plr:FindFirstChild("ButtonProgress")
-            local unld = bpObj and bpObj:FindFirstChild("UnlockedButtons")
-            local tot = bpObj and bpObj:FindFirstChild("TotalButtons")
-
-            if unld and tot then
-                if unld.Value == tot.Value and not rebirthCooldown then
-                    rebirthCooldown = true
-                    doRebirth()
-                    task.delay(5, function() rebirthCooldown = false end)
-                end
+            if not rebirthStarted and unld.Value > 0 and not rebirthStartTime then
+                rebirthStartTime = tick()
+                rebirthStarted = true
+                buttonPressCount = 1
+                lastButtonValue = unld.Value
             end
-
-            busy = false
+            if rebirthStarted and unld.Value > lastButtonValue then
+                buttonPressCount += (unld.Value - lastButtonValue)
+                lastButtonValue = unld.Value
+            end
+            if rebirthStarted and unld.Value == tot.Value and not rebirthCooldown then
+                rebirthCooldown = true
+                local cycleTime = tick() - (rebirthStartTime or tick())
+                table.insert(rebirthData, {totalTime = cycleTime})
+                if #rebirthData > MAX_REBIRTH_HISTORY then table.remove(rebirthData, 1) end
+                Library:Notify({
+                    Title = "Auto Rebirth",
+                    Description = string.format("Cycle complete in %.2fs (%d buttons)", cycleTime, buttonPressCount),
+                    Time = 3
+                })
+                rebirthStarted, rebirthStartTime, lastButtonValue, buttonPressCount = false, nil, 0, 0
+                if running then doRebirth() end
+                updateStatsUI()
+                task.delay(REBIRTH_COOLDOWN_TIME, function() rebirthCooldown = false end)
+            end
         end
 
         teleportDebrisParts()
+        skipWeatherEvent()
 
-        -- Auto Weather Skip (with notification)
-        if autoWeatherOn then
-            local ev = Players:FindFirstChild("Event_Values")
-            if ev then
-                local timer = ev:FindFirstChild("Timer")
-                local eventName = ev:FindFirstChild("EventDisplayName")
-                if timer and timer.Value > 0 then
-                    local remote = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("SkipEvent")
-                    remote:FireServer()
-                    Library:Notify({
-                        Title = "Auto Weather",
-                        Description = string.format("Skipped weather: %s (%d seconds left)", eventName and eventName.Value or "Unknown", timer.Value),
-                        Time = 3
-                    })
-                end
+        if running and not busy and not rebirthing then
+            busy = true
+            local myTycoon = Workspace:FindFirstChild("Map")
+                and Workspace.Map:FindFirstChild("Tycoons")
+                and Workspace.Map.Tycoons:FindFirstChild(plr.Name)
+            if myTycoon then
+                local cands = gatherCands(myTycoon)
+                if #cands > 0 then bringBtnAndTrigger(cands[1]) end
             end
+            busy = false
         end
-
         task.wait(0.2)
     end
 end)
 
--- === Toggle bindings for features ===
 TglButtons:OnChanged(function(v) running = v end)
 TglDebris:OnChanged(function(v) debrisOn = v end)
 TglCollect:OnChanged(function(v)
@@ -423,15 +341,11 @@ TglCollect:OnChanged(function(v)
 end)
 TglWeather:OnChanged(function(v) autoWeatherOn = v end)
 
--- Start initial resize zone if toggled on
-if collectResizerOn then
-    resizeMyCollectZone()
-end
-
--- Update UI periodically just in case
+-- Stats UI keep refreshing in background in case rebirth changes externally etc
 task.spawn(function()
     while true do
         updateStatsUI()
-        task.wait(5)
+        task.wait(4)
     end
 end)
+
