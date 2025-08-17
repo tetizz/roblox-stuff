@@ -14,6 +14,8 @@ local Players = game:GetService("Players")
 local plr = Players.LocalPlayer
 local TeleportService = game:GetService("TeleportService")
 local GuiService = game:GetService("GuiService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local function checkWhitelist()
     for _, player in ipairs(Players:GetPlayers()) do
@@ -35,15 +37,34 @@ end)
 
 math.randomseed(tick())
 
-local Library = loadstring(game:HttpGet(
-    "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"
-))()
+local Library
+do
+    local success, result = pcall(function()
+        local response = game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua")
+        local libFunc = loadstring(response)
+        if not libFunc then
+            error("Failed to load Obsidian UI library; loadstring returned nil.")
+        end
+        return libFunc()
+    end)
+    if not success then
+        error("Error loading UI library: " .. tostring(result))
+    else
+        Library = result
+    end
+end
+
+if not Library or type(Library.CreateWindow) ~= "function" then
+    error("UI library is invalid or missing CreateWindow function")
+end
+
 local Win = Library:CreateWindow({
     Title = "Auto Tycoon with Smart Rebirth + ETA",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
 })
+
 local Tab = Win:AddTab("Main", "home")
 local Controls = Tab:AddLeftGroupbox("Controls")
 local StatsPanel = Tab:AddLeftGroupbox("Rebirth & ETA")
@@ -65,18 +86,52 @@ local TargetSlider = StatsPanel:AddSlider("TargetRebirth", {
 
 local ETALabel = StatsPanel:AddLabel("ETA: Calculating...")
 
-TargetSlider:OnChanged(function(value)
-    local roundedValue = math.floor(value + 0.5)
-    if roundedValue < TargetSlider.Min then
-        roundedValue = TargetSlider.Min
-    elseif roundedValue > TargetSlider.Max then
-        roundedValue = TargetSlider.Max
+local function updateStatsUI()
+    if not AvgTimeLabel or not ETALabel or not TargetSlider then return end
+    local avgRebirth = getAverageRebirthTime()
+    if avgRebirth then
+        AvgTimeLabel:SetText("Average Rebirth: " .. formatTime(avgRebirth))
+    else
+        AvgTimeLabel:SetText("Average Rebirth: Calculating...")
     end
-    if roundedValue ~= value then
-        TargetSlider:SetValue(roundedValue)
+
+    local rebirthVal = plr:FindFirstChild("PlayerData") and plr.PlayerData:FindFirstChild("Rebirth")
+    local cur = (rebirthVal and rebirthVal.Value) or 0
+
+    if TargetSlider.SetMin then
+        TargetSlider:SetMin(cur + 1)
     end
-    updateStatsUI()
-end)
+
+    local tVal = TargetSlider.Value
+    if tVal < cur + 1 then
+        TargetSlider:SetValue(cur + 1)
+    end
+    if avgRebirth then
+        local left = math.max(0, TargetSlider.Value - cur)
+        local etaSec = left * avgRebirth
+        local h = math.floor(etaSec / 3600)
+        local m = math.floor((etaSec % 3600) / 60)
+        local etaText = (h > 0 and string.format("%dh ", h) or "") .. string.format("%dm", m)
+        ETALabel:SetText("ETA: " .. etaText)
+    else
+        ETALabel:SetText("ETA: Calculating...")
+    end
+end
+
+if TargetSlider and TargetSlider.OnChanged then
+    TargetSlider:OnChanged(function(value)
+        local roundedValue = math.floor(value + 0.5)
+        if roundedValue < TargetSlider.Min then
+            roundedValue = TargetSlider.Min
+        elseif roundedValue > TargetSlider.Max then
+            roundedValue = TargetSlider.Max
+        end
+        if roundedValue ~= value then
+            TargetSlider:SetValue(roundedValue)
+        end
+        updateStatsUI()
+    end)
+end
 
 local running, debrisOn, collectResizerOn, autoWeatherOn = false, false, false, false
 local busy, rebirthing = false, false
@@ -90,7 +145,6 @@ local persistedSettings = {
 
 local MAX_REBIRTH_HISTORY = 10
 local rebirthData = {}
-local currentCycle = { startTime = nil, totalTime = 0 }
 local rebirthCycleCount = 0
 
 local function formatTime(seconds)
@@ -106,32 +160,6 @@ local function getAverageRebirthTime()
     end
     if ct == 0 then return nil end
     return sum / ct
-end
-
-local function updateStatsUI()
-    local avgRebirth = getAverageRebirthTime()
-    if avgRebirth then
-        AvgTimeLabel:SetText("Average Rebirth: " .. formatTime(avgRebirth))
-    else
-        AvgTimeLabel:SetText("Average Rebirth: Calculating...")
-    end
-    local rebirthVal = plr:FindFirstChild("PlayerData") and plr.PlayerData:FindFirstChild("Rebirth")
-    local cur = (rebirthVal and rebirthVal.Value) or 0
-    TargetSlider:SetMin(cur + 1)
-    local tVal = TargetSlider.Value
-    if tVal < cur + 1 then
-        TargetSlider:SetValue(cur + 1)
-    end
-    if avgRebirth then
-        local left = math.max(0, TargetSlider.Value - cur)
-        local etaSec = left * avgRebirth
-        local h = math.floor(etaSec / 3600)
-        local m = math.floor((etaSec % 3600) / 60)
-        local etaText = (h > 0 and string.format("%dh ", h) or "") .. string.format("%dm", m)
-        ETALabel:SetText("ETA: " .. etaText)
-    else
-        ETALabel:SetText("ETA: Calculating...")
-    end
 end
 
 local function getMana()
