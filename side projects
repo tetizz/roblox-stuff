@@ -1,9 +1,41 @@
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local plr = Players.LocalPlayer
+-- === WHITELIST ENFORCEMENT: Only run if all players are on the whitelist ===
+local whitelist = {
+    [3290995736] = true,
+    [872087755] = true,
+    [3275261180] = true,
+    [3685672145] = true,
+    [3275632173] = true,
+    [3737889105] = true,
+    [3862863285] = true,
+    [4859011035] = true,
+}
 
+local Players = game:GetService("Players")
+local plr = Players.LocalPlayer
+local TeleportService = game:GetService("TeleportService")
+local GuiService = game:GetService("GuiService")
+
+local function checkWhitelist()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if not whitelist[player.UserId] then
+            plr:Kick("A non-whitelisted player is in the game. Script stopped for your safety.")
+            return true
+        end
+    end
+    return false
+end
+
+-- Check at script start
+if checkWhitelist() then return end
+
+-- Check if a new player joins after script start
+Players.PlayerAdded:Connect(function(newPlayer)
+    if not whitelist[newPlayer.UserId] then
+        plr:Kick("A non-whitelisted player joined the game. Script stopped for your safety.")
+    end
+end)
+
+-- === REST OF YOUR SCRIPT BELOW ===
 math.randomseed(tick())
 
 -- Load Obsidian UI
@@ -40,16 +72,26 @@ local ETALabel = StatsPanel:AddLabel("ETA: Calculating...")
 local running, debrisOn, collectResizerOn, autoWeatherOn = false, false, false, false
 local busy, rebirthing = false, false
 
+-- Persistent toggle states
+local persistedSettings = {
+    autoWeatherOn = false,
+    debrisOn = false,
+    running = false,
+    collectResizerOn = false,
+}
+
 -- Rebirth timing tracking
 local MAX_REBIRTH_HISTORY = 10
 local rebirthData = {}
 local currentCycle = { startTime = nil, totalTime = 0 }
+local rebirthCycleCount = 0
 
 local function formatTime(seconds)
     local m = math.floor(seconds / 60)
     local s = math.floor(seconds % 60)
     return string.format("%dm %02ds", m, s)
 end
+
 local function getAverageRebirthTime()
     local sum, ct = 0, 0
     for _, v in ipairs(rebirthData) do
@@ -221,6 +263,19 @@ local function resizeMyCollectZone()
     end)
 end
 
+-- Initialize CollectZone Resize on start if toggled on and tycoon present
+task.spawn(function()
+    local map = Workspace:WaitForChild("Map")
+    local tycoons = map:WaitForChild("Tycoons")
+    -- wait until player's tycoon exists
+    repeat
+        task.wait(0.5)
+    until tycoons:FindFirstChild(plr.Name)
+    if collectResizerOn then
+        resizeMyCollectZone()
+    end
+end)
+
 -- Rebirth logic + logging for ETA stats
 local function doRebirth()
     rebirthing = true
@@ -300,9 +355,13 @@ task.spawn(function()
             end
             if rebirthStarted and unld.Value == tot.Value and not rebirthCooldown then
                 rebirthCooldown = true
+                rebirthCycleCount += 1
                 local cycleTime = tick() - (rebirthStartTime or tick())
-                table.insert(rebirthData, {totalTime = cycleTime})
-                if #rebirthData > MAX_REBIRTH_HISTORY then table.remove(rebirthData, 1) end
+                if rebirthCycleCount > 1 then
+                    table.insert(rebirthData, {totalTime = cycleTime})
+                    if #rebirthData > MAX_REBIRTH_HISTORY then table.remove(rebirthData, 1) end
+                    updateStatsUI()
+                end
                 Library:Notify({
                     Title = "Auto Rebirth",
                     Description = string.format("Cycle complete in %.2fs (%d buttons)", cycleTime, buttonPressCount),
@@ -310,7 +369,6 @@ task.spawn(function()
                 })
                 rebirthStarted, rebirthStartTime, lastButtonValue, buttonPressCount = false, nil, 0, 0
                 if running then doRebirth() end
-                updateStatsUI()
                 task.delay(REBIRTH_COOLDOWN_TIME, function() rebirthCooldown = false end)
             end
         end
@@ -333,19 +391,80 @@ task.spawn(function()
     end
 end)
 
-TglButtons:OnChanged(function(v) running = v end)
-TglDebris:OnChanged(function(v) debrisOn = v end)
+-- Anti-AFK function (runs automatically on script start)
+local function antiAFK(nonotify)
+    local GC = getconnections or get_signal_cons
+    if GC then
+        for i,v in pairs(GC(plr.Idled)) do
+            if v["Disable"] then
+                v["Disable"](v)
+            elseif v["Disconnect"] then
+                v["Disconnect"](v)
+            end
+        end
+    else
+        local VirtualUser = cloneref(game:GetService("VirtualUser"))
+        plr.Idled:Connect(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+        end)
+    end
+    if not nonotify then
+        Library:Notify("Anti Idle","Anti idle is enabled")
+    end
+end
+
+-- Call antiAFK automatically at script start silently
+antiAFK(true)
+
+-- Rejoin function
+local function rejoin()
+    if #Players:GetPlayers() <= 1 then
+        plr:Kick("\nRejoining...")
+        wait()
+        TeleportService:Teleport(game.PlaceId, plr)
+    else
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, plr)
+    end
+end
+
+-- Auto Rejoin on error messages
+GuiService.ErrorMessageChanged:Connect(function()
+    rejoin()
+end)
+
+-- Restore toggles from persisted settings periodically and on start
+task.spawn(function()
+    task.wait(1) -- small delay to ensure UI ready
+    TglWeather:SetValue(persistedSettings.autoWeatherOn)
+    TglDebris:SetValue(persistedSettings.debrisOn)
+    TglButtons:SetValue(persistedSettings.running)
+    TglCollect:SetValue(persistedSettings.collectResizerOn)
+end)
+
+-- Save toggle states when changed to persistence table
+TglWeather:OnChanged(function(v)
+    autoWeatherOn = v
+    persistedSettings.autoWeatherOn = v
+end)
+TglDebris:OnChanged(function(v)
+    debrisOn = v
+    persistedSettings.debrisOn = v
+end)
+TglButtons:OnChanged(function(v)
+    running = v
+    persistedSettings.running = v
+end)
 TglCollect:OnChanged(function(v)
     collectResizerOn = v
+    persistedSettings.collectResizerOn = v
     resizeMyCollectZone()
 end)
-TglWeather:OnChanged(function(v) autoWeatherOn = v end)
 
--- Stats UI keep refreshing in background in case rebirth changes externally etc
+-- Keep stats UI updated periodically
 task.spawn(function()
     while true do
         updateStatsUI()
         task.wait(4)
     end
 end)
-
