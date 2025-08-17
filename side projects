@@ -25,20 +25,16 @@ local function checkWhitelist()
     return false
 end
 
--- Check at script start
 if checkWhitelist() then return end
 
--- Check if a new player joins after script start
 Players.PlayerAdded:Connect(function(newPlayer)
     if not whitelist[newPlayer.UserId] then
         plr:Kick("A non-whitelisted player joined the game. Script stopped for your safety.")
     end
 end)
 
--- === REST OF YOUR SCRIPT BELOW ===
 math.randomseed(tick())
 
--- Load Obsidian UI
 local Library = loadstring(game:HttpGet(
     "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"
 ))()
@@ -57,7 +53,6 @@ local TglDebris = Controls:AddToggle("AutoDebris", {Text = "Auto Collect Debris"
 local TglCollect = Controls:AddToggle("AutoCollectResize", {Text = "CollectZone Resizer", Default = false})
 local TglWeather = Controls:AddToggle("AutoWeather", {Text = "Auto Weather Skip", Default = false})
 
--- Stats UI
 local AvgTimeLabel = StatsPanel:AddLabel("Average Rebirth: Calculating...")
 
 local TargetSlider = StatsPanel:AddSlider("TargetRebirth", {
@@ -65,12 +60,11 @@ local TargetSlider = StatsPanel:AddSlider("TargetRebirth", {
     Default = 1,
     Min = 1,
     Max = 1000,
-    Rounding = 1  -- integer steps
+    Rounding = 1
 })
 
 local ETALabel = StatsPanel:AddLabel("ETA: Calculating...")
 
--- Enforce integer step on slider changes
 TargetSlider:OnChanged(function(value)
     local roundedValue = math.floor(value + 0.5)
     if roundedValue < TargetSlider.Min then
@@ -84,11 +78,9 @@ TargetSlider:OnChanged(function(value)
     updateStatsUI()
 end)
 
--- State vars
 local running, debrisOn, collectResizerOn, autoWeatherOn = false, false, false, false
 local busy, rebirthing = false, false
 
--- Persistent toggle states
 local persistedSettings = {
     autoWeatherOn = false,
     debrisOn = false,
@@ -96,7 +88,6 @@ local persistedSettings = {
     collectResizerOn = false,
 }
 
--- Rebirth timing tracking
 local MAX_REBIRTH_HISTORY = 10
 local rebirthData = {}
 local currentCycle = { startTime = nil, totalTime = 0 }
@@ -143,17 +134,18 @@ local function updateStatsUI()
     end
 end
 
--- Utility functions
 local function getMana()
     local PD = plr:FindFirstChild("PlayerData")
     local ManaVal = PD and PD:FindFirstChild("Mana")
     return ManaVal and ManaVal.Value or 0
 end
+
 local function getRebirths()
     local PD = plr:FindFirstChild("PlayerData")
     local rVal = PD and PD:FindFirstChild("Rebirth")
     return (rVal and typeof(rVal.Value) == "number") and rVal.Value or 0
 end
+
 local function getBtnPos(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not m then return nil end
@@ -162,53 +154,23 @@ end
 
 local function validBtn(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
-    if not m then 
-        print("[Debug] validBtn: Model not found for", inst:GetFullName())
-        return false
-    end
-    if not m:FindFirstChild("Button_Indicator", true) then
-        print("[Debug] validBtn: Button_Indicator missing in model:", m:GetFullName())
-        return false
-    end
-
+    if not m then return false end
+    if not m:FindFirstChild("Button_Indicator", true) then return false end
     local rebirthReq = m:GetAttribute("RebirthReq")
-    if type(rebirthReq) ~= "number" then
-        print("[Debug] validBtn: RebirthReq missing or invalid for "..m:GetFullName())
-        return false
-    end
-
-    local currentRebirths = getRebirths()
-    if rebirthReq > currentRebirths then
-        print("[Debug] validBtn: RebirthReq ("..rebirthReq..") > current rebirths ("..currentRebirths..") for "..m:GetFullName())
-        return false
-    end
-
-    local mana = getMana()
-    local unlockCost = inst:GetAttribute("UnlockCost") or math.huge
-    if mana < unlockCost then
-        print("[Debug] validBtn: Insufficient mana ("..mana.."<"..unlockCost..") for "..m:GetFullName())
-        return false
-    end
-
-    if not getBtnPos(inst) then
-        print("[Debug] validBtn: Button position is nil for "..m:GetFullName())
-        return false
-    end
-
-    print("[Debug] validBtn: Accepted button model:", m:GetFullName())
+    if type(rebirthReq) ~= "number" then return false end
+    if rebirthReq > getRebirths() then return false end
+    if getMana() < (inst:GetAttribute("UnlockCost") or math.huge) then return false end
+    if not getBtnPos(inst) then return false end
     return true
 end
 
 local function gatherCands(root)
     local res = {}
-    print("[Debug] gatherCands: scanning descendants of ".. (root and root:GetFullName() or "nil"))
     for _, inst in ipairs(root:GetDescendants()) do
         if validBtn(inst) then
             table.insert(res, inst)
-            print("[Debug] gatherCands: valid button found: "..inst:GetFullName())
         end
     end
-    print("[Debug] gatherCands: total valid buttons found: ".. #res)
     return res
 end
 
@@ -222,15 +184,10 @@ plr.CharacterAdded:Connect(function(c)
     hrp = c:WaitForChild("HumanoidRootPart")
 end)
 
--- Auto Debris Collector
 local function teleportDebrisParts()
-    if not debrisOn or not hrp then 
-        print("[Debug] teleportDebrisParts: skipping because debrisOn or hrp false")
-        return 
-    end
+    if not debrisOn or not hrp then return end
     local debrisFolder = Workspace:FindFirstChild("Debris")
     if debrisFolder then
-        print("[Debug] teleportDebrisParts: scanning debris parts")
         for _, obj in ipairs(debrisFolder:GetDescendants()) do
             if obj:IsA("BasePart") then
                 local nameLower = string.lower(obj.Name)
@@ -240,16 +197,12 @@ local function teleportDebrisParts()
                     obj.Massless = true
                     obj.CFrame = hrp.CFrame
                     task.wait(0.02)
-                    print("[Debug] teleportDebrisParts: moved debris", obj.Name)
                 end
             end
         end
-    else
-        print("[Debug] teleportDebrisParts: Debris folder not found")
     end
 end
 
--- Weather Skipper
 local function skipWeatherEvent()
     if not autoWeatherOn then return end
     local evObj = Players:FindFirstChild("Event_Values")
@@ -270,17 +223,13 @@ local function skipWeatherEvent()
     end
 end
 
--- CollectZone Resizer
 local collectResizerThread
 local function resizeMyCollectZone()
     if collectResizerThread then
         task.cancel(collectResizerThread)
         collectResizerThread = nil
     end
-    if not collectResizerOn then
-        print("[Debug] resizeMyCollectZone: toggle off, cancelling resize thread")
-        return 
-    end
+    if not collectResizerOn then return end
     collectResizerThread = task.spawn(function()
         local myTycoon
         repeat
@@ -288,19 +237,14 @@ local function resizeMyCollectZone()
             local tf = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Tycoons")
             myTycoon = tf and tf:FindFirstChild(plr.Name)
         until myTycoon
-        print("[Debug] resizeMyCollectZone: found player tycoon")
 
         local baseSize = Vector3.new(2000, 2000, 2000)
         local delta = Vector3.new(1, 1, 1)
         local flip = false
 
-        -- Immediate resize first
         local cz = myTycoon:FindFirstChild("T_Collect_Zone") and myTycoon.T_Collect_Zone:FindFirstChild("CollectZone")
         if cz and cz:IsA("BasePart") then
             cz.Size = baseSize + delta
-            print("[Debug] resizeMyCollectZone: immediate resize to", cz.Size)
-        else
-            print("[Debug] resizeMyCollectZone: collect zone part not found on immediate resize")
         end
 
         while collectResizerOn do
@@ -308,39 +252,26 @@ local function resizeMyCollectZone()
             if myTycoon then
                 local cz = myTycoon:FindFirstChild("T_Collect_Zone") and myTycoon.T_Collect_Zone:FindFirstChild("CollectZone")
                 if cz and cz:IsA("BasePart") then
-                    local newSize = flip and (baseSize - delta) or (baseSize + delta)
-                    cz.Size = newSize
-                    print("[Debug] resizeMyCollectZone: set size to", newSize)
-                else
-                    print("[Debug] resizeMyCollectZone: collect zone part not found in loop")
+                    cz.Size = flip and (baseSize - delta) or (baseSize + delta)
                 end
-            else
-                print("[Debug] resizeMyCollectZone: player tycoon not found in loop")
             end
             flip = not flip
             task.wait(0.5)
         end
-        print("[Debug] resizeMyCollectZone: coroutine ending")
     end)
 end
 
--- Initialize CollectZone Resize on start if toggled on and tycoon present
 task.spawn(function()
     local map = Workspace:WaitForChild("Map")
     local tycoons = map:WaitForChild("Tycoons")
-    -- wait until player's tycoon exists
     repeat
         task.wait(0.5)
     until tycoons:FindFirstChild(plr.Name)
     if collectResizerOn then
-        print("[Debug] Starting collection zone resizing on script init")
         resizeMyCollectZone()
-    else
-        print("[Debug] CollectZone resizing toggle off on script init")
     end
 end)
 
--- Rebirth logic + logging for ETA stats
 local function doRebirth()
     rebirthing = true
     local repEv = ReplicatedStorage:WaitForChild("RemoteEvents")
@@ -385,17 +316,71 @@ local function doRebirth()
         })
         repEv.PickCallback:InvokeServer()
     end
-    if collectResizerOn then resizeMyCollectZone() end
+    if collectResizerOn then
+        resizeMyCollectZone()
+    end
     rebirthing = false
 end
 
--- Rebirth tracking logic (cycle, average, eta, etc)
 local rebirthStarted, rebirthStartTime, lastButtonValue, buttonPressCount = false, nil, 0, 0
 local REBIRTH_COOLDOWN_TIME = 5
 local rebirthCooldown = false
 
+local lastButtonCheck = 0
+local buttonCheckInterval = 1 -- seconds
+
 task.spawn(function()
+    local map, tycoons, myTycoon
+
+    repeat
+        task.wait(1)
+        map = Workspace:FindFirstChild("Map")
+        tycoons = map and map:FindFirstChild("Tycoons")
+    until tycoons
+
     while true do
+        if running and not busy and not rebirthing then
+            busy = true
+
+            myTycoon = tycoons:FindFirstChild(plr.Name)
+
+            if not myTycoon then
+                busy = false
+                task.wait(buttonCheckInterval)
+                goto continue
+            end
+
+            if (os.clock() - lastButtonCheck) >= buttonCheckInterval then
+                lastButtonCheck = os.clock()
+
+                local cands = gatherCands(myTycoon)
+                if #cands > 0 then
+                    local button = cands[1]
+                    local m = button:IsA("Model") and button or button:FindFirstAncestorWhichIsA("Model")
+                    if m and hrp then
+                        for _, p in ipairs(m:GetDescendants()) do
+                            if p:IsA("BasePart") then
+                                p.CanCollide = false
+                                p.Massless = true
+                            end
+                        end
+                        m:PivotTo(hrp.CFrame * CFrame.new(0, 0, -2))
+                        task.wait(0.05)
+                        local prompt = m:FindFirstChildOfClass("ProximityPrompt") or m:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if prompt then
+                            prompt.MaxActivationDistance = 15
+                            prompt.RequiresLineOfSight = false
+                            prompt:InputHoldBegin()
+                            task.wait(prompt.HoldDuration + 0.05)
+                            prompt:InputHoldEnd()
+                        end
+                    end
+                end
+            end
+
+            busy = false
+        end
+
         local bpObj = plr:FindFirstChild("ButtonProgress")
         local unld = bpObj and bpObj:FindFirstChild("UnlockedButtons")
         local tot = bpObj and bpObj:FindFirstChild("TotalButtons")
@@ -423,7 +408,9 @@ task.spawn(function()
                 local cycleTime = tick() - (rebirthStartTime or tick())
                 if rebirthCycleCount > 1 then
                     table.insert(rebirthData, {totalTime = cycleTime})
-                    if #rebirthData > MAX_REBIRTH_HISTORY then table.remove(rebirthData, 1) end
+                    if #rebirthData > MAX_REBIRTH_HISTORY then
+                        table.remove(rebirthData, 1)
+                    end
                     updateStatsUI()
                 end
                 Library:Notify({
@@ -432,63 +419,29 @@ task.spawn(function()
                     Time = 3
                 })
                 rebirthStarted, rebirthStartTime, lastButtonValue, buttonPressCount = false, nil, 0, 0
-                if running then doRebirth() end
-                task.delay(REBIRTH_COOLDOWN_TIME, function() rebirthCooldown = false end)
+
+                if running then
+                    doRebirth()
+                end
+                task.delay(REBIRTH_COOLDOWN_TIME, function()
+                    rebirthCooldown = false
+                end)
             end
         end
 
-        teleportDebrisParts()
-        skipWeatherEvent()
+        if debrisOn then
+            teleportDebrisParts()
+        end
 
-        if running and not busy and not rebirthing then
-            busy = true
-            local myTycoon = Workspace:FindFirstChild("Map")
-                and Workspace.Map:FindFirstChild("Tycoons")
-                and Workspace.Map.Tycoons:FindFirstChild(plr.Name)
-
-            if myTycoon then
-                local cands = gatherCands(myTycoon)
-                if #cands > 0 then
-                    local button = cands[1]
-                    print("[Debug] MainLoop: triggering button: " .. button:GetFullName())
-                    local m = button:IsA("Model") and button or button:FindFirstAncestorWhichIsA("Model")
-                    if m and hrp then
-                        for _, p in ipairs(m:GetDescendants()) do
-                            if p:IsA("BasePart") then
-                                p.CanCollide = false
-                                p.Massless = true
-                            end
-                        end
-                        m:PivotTo(hrp.CFrame * CFrame.new(0, 0, -2))
-                        task.wait(0.05)
-                        local prompt = m:FindFirstChildOfClass("ProximityPrompt") or m:FindFirstChildWhichIsA("ProximityPrompt", true)
-                        if prompt then
-                            prompt.MaxActivationDistance = 15
-                            prompt.RequiresLineOfSight = false
-                            prompt:InputHoldBegin()
-                            task.wait(prompt.HoldDuration + 0.05)
-                            prompt:InputHoldEnd()
-                            print("[Debug] MainLoop: button triggered: " .. m:GetFullName())
-                        else
-                            print("[Debug] MainLoop: ProximityPrompt not found in button: " .. m:GetFullName())
-                        end
-                    else
-                        print("[Debug] MainLoop: Model or HumanoidRootPart not found for button")
-                    end
-                else
-                    print("[Debug] MainLoop: no valid buttons found")
-                end
-            else
-                print("[Debug] MainLoop: Player tycoon not found")
-            end
-            busy = false
+        if autoWeatherOn then
+            skipWeatherEvent()
         end
 
         task.wait(0.2)
+        ::continue::
     end
 end)
 
--- Anti-AFK function (runs automatically on script start)
 local function antiAFK(nonotify)
     local GC = getconnections or get_signal_cons
     if GC then
@@ -507,14 +460,12 @@ local function antiAFK(nonotify)
         end)
     end
     if not nonotify then
-        Library:Notify("Anti Idle","Anti idle is enabled")
+        Library:Notify("Anti Idle", "Anti idle is enabled")
     end
 end
 
--- Call antiAFK automatically at script start silently
 antiAFK(true)
 
--- Rejoin function
 local function rejoin()
     if #Players:GetPlayers() <= 1 then
         plr:Kick("\nRejoining...")
@@ -525,21 +476,18 @@ local function rejoin()
     end
 end
 
--- Auto Rejoin on error messages
 GuiService.ErrorMessageChanged:Connect(function()
     rejoin()
 end)
 
--- Restore toggles from persisted settings periodically and on start
 task.spawn(function()
-    task.wait(1) -- small delay to ensure UI ready
+    task.wait(1)
     TglWeather:SetValue(persistedSettings.autoWeatherOn)
     TglDebris:SetValue(persistedSettings.debrisOn)
     TglButtons:SetValue(persistedSettings.running)
     TglCollect:SetValue(persistedSettings.collectResizerOn)
 end)
 
--- Save toggle states when changed to persistence table
 TglWeather:OnChanged(function(v)
     autoWeatherOn = v
     persistedSettings.autoWeatherOn = v
@@ -558,7 +506,6 @@ TglCollect:OnChanged(function(v)
     resizeMyCollectZone()
 end)
 
--- Keep stats UI updated periodically
 task.spawn(function()
     while true do
         updateStatsUI()
