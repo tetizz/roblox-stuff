@@ -59,6 +59,7 @@ local TglWeather = Controls:AddToggle("AutoWeather", {Text = "Auto Weather Skip"
 
 -- Stats UI
 local AvgTimeLabel = StatsPanel:AddLabel("Average Rebirth: Calculating...")
+
 local TargetSlider = StatsPanel:AddSlider("TargetRebirth", {
     Text = "Target Rebirth",
     Default = 1,
@@ -158,51 +159,68 @@ local function getBtnPos(inst)
     if not m then return nil end
     return m.PrimaryPart and m.PrimaryPart.Position or m:GetPivot().Position
 end
+
 local function validBtn(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not m then 
-        print("[Debug] validBtn: Model not found")
-        return false 
+        print("[Debug] validBtn: Model not found for", inst:GetFullName())
+        return false
     end
     if not m:FindFirstChild("Button_Indicator", true) then
-        print("[Debug] validBtn: Button_Indicator missing in model:", m.Name)
+        print("[Debug] validBtn: Button_Indicator missing in model:", m:GetFullName())
         return false
     end
+
     local rebirthReq = m:GetAttribute("RebirthReq")
     if type(rebirthReq) ~= "number" then
-        print("[Debug] validBtn: RebirthReq attribute invalid or missing for", m.Name)
+        print("[Debug] validBtn: RebirthReq missing or invalid for "..m:GetFullName())
         return false
     end
+
     local currentRebirths = getRebirths()
     if rebirthReq > currentRebirths then
-        print("[Debug] validBtn: RebirthReq ("..rebirthReq..") > current rebirths ("..currentRebirths..") for " .. m.Name)
+        print("[Debug] validBtn: RebirthReq ("..rebirthReq..") > current rebirths ("..currentRebirths..") for "..m:GetFullName())
         return false
     end
+
     local mana = getMana()
     local unlockCost = inst:GetAttribute("UnlockCost") or math.huge
     if mana < unlockCost then
-        print("[Debug] validBtn: Insufficient mana ("..mana.."<"..unlockCost..") for", m.Name)
+        print("[Debug] validBtn: Insufficient mana ("..mana.."<"..unlockCost..") for "..m:GetFullName())
         return false
     end
+
     if not getBtnPos(inst) then
-        print("[Debug] validBtn: Button position is nil for", m.Name)
+        print("[Debug] validBtn: Button position is nil for "..m:GetFullName())
         return false
     end
-    print("[Debug] validBtn: Accepted button model:", m.Name)
+
+    print("[Debug] validBtn: Accepted button model:", m:GetFullName())
     return true
 end
+
 local function gatherCands(root)
     local res = {}
-    print("[Debug] gatherCands: scanning descendants of", root and root.Name or "nil")
+    print("[Debug] gatherCands: scanning descendants of ".. (root and root:GetFullName() or "nil"))
     for _, inst in ipairs(root:GetDescendants()) do
         if validBtn(inst) then
             table.insert(res, inst)
-            print("[Debug] gatherCands: button valid: ", inst.Name)
+            print("[Debug] gatherCands: valid button found: "..inst:GetFullName())
         end
     end
-    print("[Debug] gatherCands: total valid buttons found:", #res)
+    print("[Debug] gatherCands: total valid buttons found: ".. #res)
     return res
 end
+
+local char, hrp
+if plr.Character then
+    char = plr.Character
+    hrp = char:WaitForChild("HumanoidRootPart")
+end
+plr.CharacterAdded:Connect(function(c)
+    char = c
+    hrp = c:WaitForChild("HumanoidRootPart")
+end)
 
 -- Auto Debris Collector
 local function teleportDebrisParts()
@@ -427,11 +445,36 @@ task.spawn(function()
             local myTycoon = Workspace:FindFirstChild("Map")
                 and Workspace.Map:FindFirstChild("Tycoons")
                 and Workspace.Map.Tycoons:FindFirstChild(plr.Name)
+
             if myTycoon then
                 local cands = gatherCands(myTycoon)
                 if #cands > 0 then
-                    print("[Debug] MainLoop: found valid buttons count:", #cands)
-                    -- Button interaction disabled, as requested
+                    local button = cands[1]
+                    print("[Debug] MainLoop: triggering button: " .. button:GetFullName())
+                    local m = button:IsA("Model") and button or button:FindFirstAncestorWhichIsA("Model")
+                    if m and hrp then
+                        for _, p in ipairs(m:GetDescendants()) do
+                            if p:IsA("BasePart") then
+                                p.CanCollide = false
+                                p.Massless = true
+                            end
+                        end
+                        m:PivotTo(hrp.CFrame * CFrame.new(0, 0, -2))
+                        task.wait(0.05)
+                        local prompt = m:FindFirstChildOfClass("ProximityPrompt") or m:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if prompt then
+                            prompt.MaxActivationDistance = 15
+                            prompt.RequiresLineOfSight = false
+                            prompt:InputHoldBegin()
+                            task.wait(prompt.HoldDuration + 0.05)
+                            prompt:InputHoldEnd()
+                            print("[Debug] MainLoop: button triggered: " .. m:GetFullName())
+                        else
+                            print("[Debug] MainLoop: ProximityPrompt not found in button: " .. m:GetFullName())
+                        end
+                    else
+                        print("[Debug] MainLoop: Model or HumanoidRootPart not found for button")
+                    end
                 else
                     print("[Debug] MainLoop: no valid buttons found")
                 end
@@ -440,6 +483,7 @@ task.spawn(function()
             end
             busy = false
         end
+
         task.wait(0.2)
     end
 end)
