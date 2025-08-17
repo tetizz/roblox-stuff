@@ -249,6 +249,11 @@ local function resizeMyCollectZone()
         local baseSize = Vector3.new(2000, 2000, 2000)
         local delta = Vector3.new(1, 1, 1)
         local flip = false
+        -- Immediate resize first
+        local cz = myTycoon:FindFirstChild("T_Collect_Zone") and myTycoon.T_Collect_Zone:FindFirstChild("CollectZone")
+        if cz and cz:IsA("BasePart") then
+            cz.Size = baseSize + delta
+        end
         while collectResizerOn do
             myTycoon = Workspace.Map.Tycoons:FindFirstChild(plr.Name)
             if myTycoon then
