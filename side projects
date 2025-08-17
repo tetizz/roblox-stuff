@@ -1,70 +1,21 @@
--- === WHITELIST ENFORCEMENT: Only run if all players are on the whitelist ===
-local whitelist = {
-    [3290995736] = true,
-    [872087755] = true,
-    [3275261180] = true,
-    [3685672145] = true,
-    [3275632173] = true,
-    [3737889105] = true,
-    [3862863285] = true,
-    [4859011035] = true,
-}
-
 local Players = game:GetService("Players")
-local plr = Players.LocalPlayer
-local TeleportService = game:GetService("TeleportService")
-local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
-
-local function checkWhitelist()
-    for _, player in ipairs(Players:GetPlayers()) do
-        if not whitelist[player.UserId] then
-            plr:Kick("A non-whitelisted player is in the game. Script stopped for your safety.")
-            return true
-        end
-    end
-    return false
-end
-
-if checkWhitelist() then return end
-
-Players.PlayerAdded:Connect(function(newPlayer)
-    if not whitelist[newPlayer.UserId] then
-        plr:Kick("A non-whitelisted player joined the game. Script stopped for your safety.")
-    end
-end)
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local plr = Players.LocalPlayer
 
 math.randomseed(tick())
 
-local Library
-do
-    local success, result = pcall(function()
-        local response = game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua")
-        local libFunc = loadstring(response)
-        if not libFunc then
-            error("Failed to load Obsidian UI library; loadstring returned nil.")
-        end
-        return libFunc()
-    end)
-    if not success then
-        error("Error loading UI library: " .. tostring(result))
-    else
-        Library = result
-    end
-end
-
-if not Library or type(Library.CreateWindow) ~= "function" then
-    error("UI library is invalid or missing CreateWindow function")
-end
-
+-- Load Obsidian UI
+local Library = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"
+))()
 local Win = Library:CreateWindow({
     Title = "Auto Tycoon with Smart Rebirth + ETA",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
     AutoShow = true
 })
-
 local Tab = Win:AddTab("Main", "home")
 local Controls = Tab:AddLeftGroupbox("Controls")
 local StatsPanel = Tab:AddLeftGroupbox("Rebirth & ETA")
@@ -74,8 +25,8 @@ local TglDebris = Controls:AddToggle("AutoDebris", {Text = "Auto Collect Debris"
 local TglCollect = Controls:AddToggle("AutoCollectResize", {Text = "CollectZone Resizer", Default = false})
 local TglWeather = Controls:AddToggle("AutoWeather", {Text = "Auto Weather Skip", Default = false})
 
+-- Stats UI
 local AvgTimeLabel = StatsPanel:AddLabel("Average Rebirth: Calculating...")
-
 local TargetSlider = StatsPanel:AddSlider("TargetRebirth", {
     Text = "Target Rebirth",
     Default = 1,
@@ -83,25 +34,41 @@ local TargetSlider = StatsPanel:AddSlider("TargetRebirth", {
     Max = 1000,
     Rounding = 1
 })
-
 local ETALabel = StatsPanel:AddLabel("ETA: Calculating...")
 
+-- State vars
+local running, debrisOn, collectResizerOn, autoWeatherOn = false, false, false, false
+local busy, rebirthing = false, false
+
+-- Rebirth timing tracking
+local MAX_REBIRTH_HISTORY = 10
+local rebirthData = {}
+local currentCycle = { startTime = nil, totalTime = 0 }
+
+local function formatTime(seconds)
+    local m = math.floor(seconds / 60)
+    local s = math.floor(seconds % 60)
+    return string.format("%dm %02ds", m, s)
+end
+local function getAverageRebirthTime()
+    local sum, ct = 0, 0
+    for _, v in ipairs(rebirthData) do
+        if v.totalTime then sum = sum + v.totalTime; ct = ct + 1 end
+    end
+    if ct == 0 then return nil end
+    return sum / ct
+end
+
 local function updateStatsUI()
-    if not AvgTimeLabel or not ETALabel or not TargetSlider then return end
     local avgRebirth = getAverageRebirthTime()
     if avgRebirth then
         AvgTimeLabel:SetText("Average Rebirth: " .. formatTime(avgRebirth))
     else
         AvgTimeLabel:SetText("Average Rebirth: Calculating...")
     end
-
     local rebirthVal = plr:FindFirstChild("PlayerData") and plr.PlayerData:FindFirstChild("Rebirth")
     local cur = (rebirthVal and rebirthVal.Value) or 0
-
-    if TargetSlider.SetMin then
-        TargetSlider:SetMin(cur + 1)
-    end
-
+    TargetSlider:SetMin(cur + 1)
     local tVal = TargetSlider.Value
     if tVal < cur + 1 then
         TargetSlider:SetValue(cur + 1)
@@ -117,91 +84,40 @@ local function updateStatsUI()
         ETALabel:SetText("ETA: Calculating...")
     end
 end
+TargetSlider:OnChanged(function() updateStatsUI() end)
 
-if TargetSlider and TargetSlider.OnChanged then
-    TargetSlider:OnChanged(function(value)
-        local roundedValue = math.floor(value + 0.5)
-        if roundedValue < TargetSlider.Min then
-            roundedValue = TargetSlider.Min
-        elseif roundedValue > TargetSlider.Max then
-            roundedValue = TargetSlider.Max
-        end
-        if roundedValue ~= value then
-            TargetSlider:SetValue(roundedValue)
-        end
-        updateStatsUI()
-    end)
-end
-
-local running, debrisOn, collectResizerOn, autoWeatherOn = false, false, false, false
-local busy, rebirthing = false, false
-
-local persistedSettings = {
-    autoWeatherOn = false,
-    debrisOn = false,
-    running = false,
-    collectResizerOn = false,
-}
-
-local MAX_REBIRTH_HISTORY = 10
-local rebirthData = {}
-local rebirthCycleCount = 0
-
-local function formatTime(seconds)
-    local m = math.floor(seconds / 60)
-    local s = math.floor(seconds % 60)
-    return string.format("%dm %02ds", m, s)
-end
-
-local function getAverageRebirthTime()
-    local sum, ct = 0, 0
-    for _, v in ipairs(rebirthData) do
-        if v.totalTime then sum = sum + v.totalTime; ct = ct + 1 end
-    end
-    if ct == 0 then return nil end
-    return sum / ct
-end
-
+-- Utility functions
 local function getMana()
     local PD = plr:FindFirstChild("PlayerData")
     local ManaVal = PD and PD:FindFirstChild("Mana")
     return ManaVal and ManaVal.Value or 0
 end
-
 local function getRebirths()
     local PD = plr:FindFirstChild("PlayerData")
     local rVal = PD and PD:FindFirstChild("Rebirth")
     return (rVal and typeof(rVal.Value) == "number") and rVal.Value or 0
 end
-
 local function getBtnPos(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not m then return nil end
     return m.PrimaryPart and m.PrimaryPart.Position or m:GetPivot().Position
 end
-
 local function validBtn(inst)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
-    if not m then return false end
-    if not m:FindFirstChild("Button_Indicator", true) then return false end
+    if not (m and m:FindFirstChild("Button_Indicator", true)) then return false end
     local rebirthReq = m:GetAttribute("RebirthReq")
     if type(rebirthReq) ~= "number" then return false end
     if rebirthReq > getRebirths() then return false end
     if getMana() < (inst:GetAttribute("UnlockCost") or math.huge) then return false end
-    if not getBtnPos(inst) then return false end
-    return true
+    return getBtnPos(inst) ~= nil
 end
-
 local function gatherCands(root)
     local res = {}
     for _, inst in ipairs(root:GetDescendants()) do
-        if validBtn(inst) then
-            table.insert(res, inst)
-        end
+        if validBtn(inst) then table.insert(res, inst) end
     end
     return res
 end
-
 local char, hrp
 if plr.Character then
     char = plr.Character
@@ -211,7 +127,28 @@ plr.CharacterAdded:Connect(function(c)
     char = c
     hrp = c:WaitForChild("HumanoidRootPart")
 end)
+local function bringBtnAndTrigger(inst)
+    if not hrp then return end
+    local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
+    for _, p in ipairs(m:GetDescendants()) do
+        if p:IsA("BasePart") then p.CanCollide = false; p.Massless = true end
+    end
+    m:PivotTo(hrp.CFrame * CFrame.new(0, 0, -2))
+    task.wait(0.05)
+    local prompt = m:FindFirstChildOfClass("ProximityPrompt") or m:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if prompt then
+        prompt.MaxActivationDistance = 15
+        prompt.RequiresLineOfSight = false
+        prompt:InputHoldBegin()
+        task.wait(prompt.HoldDuration + 0.05)
+        prompt:InputHoldEnd()
+        VirtualInputManager:SendKeyEvent(true, "E", false, game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false, "E", false, game)
+    end
+end
 
+-- Auto Debris Collector
 local function teleportDebrisParts()
     if not debrisOn or not hrp then return end
     local debrisFolder = Workspace:FindFirstChild("Debris")
@@ -231,6 +168,7 @@ local function teleportDebrisParts()
     end
 end
 
+-- Weather Skipper
 local function skipWeatherEvent()
     if not autoWeatherOn then return end
     local evObj = Players:FindFirstChild("Event_Values")
@@ -251,6 +189,7 @@ local function skipWeatherEvent()
     end
 end
 
+-- CollectZone Resizer
 local collectResizerThread
 local function resizeMyCollectZone()
     if collectResizerThread then
@@ -265,16 +204,9 @@ local function resizeMyCollectZone()
             local tf = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Tycoons")
             myTycoon = tf and tf:FindFirstChild(plr.Name)
         until myTycoon
-
         local baseSize = Vector3.new(2000, 2000, 2000)
         local delta = Vector3.new(1, 1, 1)
         local flip = false
-
-        local cz = myTycoon:FindFirstChild("T_Collect_Zone") and myTycoon.T_Collect_Zone:FindFirstChild("CollectZone")
-        if cz and cz:IsA("BasePart") then
-            cz.Size = baseSize + delta
-        end
-
         while collectResizerOn do
             myTycoon = Workspace.Map.Tycoons:FindFirstChild(plr.Name)
             if myTycoon then
@@ -289,17 +221,7 @@ local function resizeMyCollectZone()
     end)
 end
 
-task.spawn(function()
-    local map = Workspace:WaitForChild("Map")
-    local tycoons = map:WaitForChild("Tycoons")
-    repeat
-        task.wait(0.5)
-    until tycoons:FindFirstChild(plr.Name)
-    if collectResizerOn then
-        resizeMyCollectZone()
-    end
-end)
-
+-- Rebirth logic + logging for ETA stats
 local function doRebirth()
     rebirthing = true
     local repEv = ReplicatedStorage:WaitForChild("RemoteEvents")
@@ -344,71 +266,17 @@ local function doRebirth()
         })
         repEv.PickCallback:InvokeServer()
     end
-    if collectResizerOn then
-        resizeMyCollectZone()
-    end
+    if collectResizerOn then resizeMyCollectZone() end
     rebirthing = false
 end
 
+-- Rebirth tracking logic (cycle, average, eta, etc)
 local rebirthStarted, rebirthStartTime, lastButtonValue, buttonPressCount = false, nil, 0, 0
 local REBIRTH_COOLDOWN_TIME = 5
 local rebirthCooldown = false
 
-local lastButtonCheck = 0
-local buttonCheckInterval = 1 -- seconds
-
 task.spawn(function()
-    local map, tycoons, myTycoon
-
-    repeat
-        task.wait(1)
-        map = Workspace:FindFirstChild("Map")
-        tycoons = map and map:FindFirstChild("Tycoons")
-    until tycoons
-
     while true do
-        if running and not busy and not rebirthing then
-            busy = true
-
-            myTycoon = tycoons:FindFirstChild(plr.Name)
-
-            if not myTycoon then
-                busy = false
-                task.wait(buttonCheckInterval)
-                goto continue
-            end
-
-            if (os.clock() - lastButtonCheck) >= buttonCheckInterval then
-                lastButtonCheck = os.clock()
-
-                local cands = gatherCands(myTycoon)
-                if #cands > 0 then
-                    local button = cands[1]
-                    local m = button:IsA("Model") and button or button:FindFirstAncestorWhichIsA("Model")
-                    if m and hrp then
-                        for _, p in ipairs(m:GetDescendants()) do
-                            if p:IsA("BasePart") then
-                                p.CanCollide = false
-                                p.Massless = true
-                            end
-                        end
-                        m:PivotTo(hrp.CFrame * CFrame.new(0, 0, -2))
-                        task.wait(0.05)
-                        local prompt = m:FindFirstChildOfClass("ProximityPrompt") or m:FindFirstChildWhichIsA("ProximityPrompt", true)
-                        if prompt then
-                            prompt.MaxActivationDistance = 15
-                            prompt.RequiresLineOfSight = false
-                            prompt:InputHoldBegin()
-                            task.wait(prompt.HoldDuration + 0.05)
-                            prompt:InputHoldEnd()
-                        end
-                    end
-                end
-            end
-
-            busy = false
-        end
-
         local bpObj = plr:FindFirstChild("ButtonProgress")
         local unld = bpObj and bpObj:FindFirstChild("UnlockedButtons")
         local tot = bpObj and bpObj:FindFirstChild("TotalButtons")
@@ -432,108 +300,48 @@ task.spawn(function()
             end
             if rebirthStarted and unld.Value == tot.Value and not rebirthCooldown then
                 rebirthCooldown = true
-                rebirthCycleCount += 1
                 local cycleTime = tick() - (rebirthStartTime or tick())
-                if rebirthCycleCount > 1 then
-                    table.insert(rebirthData, {totalTime = cycleTime})
-                    if #rebirthData > MAX_REBIRTH_HISTORY then
-                        table.remove(rebirthData, 1)
-                    end
-                    updateStatsUI()
-                end
+                table.insert(rebirthData, {totalTime = cycleTime})
+                if #rebirthData > MAX_REBIRTH_HISTORY then table.remove(rebirthData, 1) end
                 Library:Notify({
                     Title = "Auto Rebirth",
                     Description = string.format("Cycle complete in %.2fs (%d buttons)", cycleTime, buttonPressCount),
                     Time = 3
                 })
                 rebirthStarted, rebirthStartTime, lastButtonValue, buttonPressCount = false, nil, 0, 0
-
-                if running then
-                    doRebirth()
-                end
-                task.delay(REBIRTH_COOLDOWN_TIME, function()
-                    rebirthCooldown = false
-                end)
+                if running then doRebirth() end
+                updateStatsUI()
+                task.delay(REBIRTH_COOLDOWN_TIME, function() rebirthCooldown = false end)
             end
         end
 
-        if debrisOn then
-            teleportDebrisParts()
-        end
+        teleportDebrisParts()
+        skipWeatherEvent()
 
-        if autoWeatherOn then
-            skipWeatherEvent()
+        if running and not busy and not rebirthing then
+            busy = true
+            local myTycoon = Workspace:FindFirstChild("Map")
+                and Workspace.Map:FindFirstChild("Tycoons")
+                and Workspace.Map.Tycoons:FindFirstChild(plr.Name)
+            if myTycoon then
+                local cands = gatherCands(myTycoon)
+                if #cands > 0 then bringBtnAndTrigger(cands[1]) end
+            end
+            busy = false
         end
-
         task.wait(0.2)
-        ::continue::
     end
 end)
 
-local function antiAFK(nonotify)
-    local GC = getconnections or get_signal_cons
-    if GC then
-        for i,v in pairs(GC(plr.Idled)) do
-            if v["Disable"] then
-                v["Disable"](v)
-            elseif v["Disconnect"] then
-                v["Disconnect"](v)
-            end
-        end
-    else
-        local VirtualUser = cloneref(game:GetService("VirtualUser"))
-        plr.Idled:Connect(function()
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton2(Vector2.new())
-        end)
-    end
-    if not nonotify then
-        Library:Notify("Anti Idle", "Anti idle is enabled")
-    end
-end
-
-antiAFK(true)
-
-local function rejoin()
-    if #Players:GetPlayers() <= 1 then
-        plr:Kick("\nRejoining...")
-        wait()
-        TeleportService:Teleport(game.PlaceId, plr)
-    else
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, plr)
-    end
-end
-
-GuiService.ErrorMessageChanged:Connect(function()
-    rejoin()
-end)
-
-task.spawn(function()
-    task.wait(1)
-    TglWeather:SetValue(persistedSettings.autoWeatherOn)
-    TglDebris:SetValue(persistedSettings.debrisOn)
-    TglButtons:SetValue(persistedSettings.running)
-    TglCollect:SetValue(persistedSettings.collectResizerOn)
-end)
-
-TglWeather:OnChanged(function(v)
-    autoWeatherOn = v
-    persistedSettings.autoWeatherOn = v
-end)
-TglDebris:OnChanged(function(v)
-    debrisOn = v
-    persistedSettings.debrisOn = v
-end)
-TglButtons:OnChanged(function(v)
-    running = v
-    persistedSettings.running = v
-end)
+TglButtons:OnChanged(function(v) running = v end)
+TglDebris:OnChanged(function(v) debrisOn = v end)
 TglCollect:OnChanged(function(v)
     collectResizerOn = v
-    persistedSettings.collectResizerOn = v
     resizeMyCollectZone()
 end)
+TglWeather:OnChanged(function(v) autoWeatherOn = v end)
 
+-- Stats UI keep refreshing in background in case rebirth changes externally etc
 task.spawn(function()
     while true do
         updateStatsUI()
