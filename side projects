@@ -64,9 +64,24 @@ local TargetSlider = StatsPanel:AddSlider("TargetRebirth", {
     Default = 1,
     Min = 1,
     Max = 1000,
-    Rounding = 1
+    Rounding = 1  -- integer steps
 })
+
 local ETALabel = StatsPanel:AddLabel("ETA: Calculating...")
+
+-- Enforce integer step on slider changes
+TargetSlider:OnChanged(function(value)
+    local roundedValue = math.floor(value + 0.5)
+    if roundedValue < TargetSlider.Min then
+        roundedValue = TargetSlider.Min
+    elseif roundedValue > TargetSlider.Max then
+        roundedValue = TargetSlider.Max
+    end
+    if roundedValue ~= value then
+        TargetSlider:SetValue(roundedValue)
+    end
+    updateStatsUI()
+end)
 
 -- State vars
 local running, debrisOn, collectResizerOn, autoWeatherOn = false, false, false, false
@@ -126,7 +141,6 @@ local function updateStatsUI()
         ETALabel:SetText("ETA: Calculating...")
     end
 end
-TargetSlider:OnChanged(function() updateStatsUI() end)
 
 -- Utility functions
 local function getMana()
@@ -188,48 +202,6 @@ local function gatherCands(root)
     end
     print("[Debug] gatherCands: total valid buttons found:", #res)
     return res
-end
-local char, hrp
-if plr.Character then
-    char = plr.Character
-    hrp = char:WaitForChild("HumanoidRootPart")
-end
-plr.CharacterAdded:Connect(function(c)
-    char = c
-    hrp = c:WaitForChild("HumanoidRootPart")
-end)
-local function bringBtnAndTrigger(inst)
-    if not hrp then
-        print("[Debug] bringBtnAndTrigger: HumanoidRootPart not found")
-        return
-    end
-    local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
-    if not m then
-        print("[Debug] bringBtnAndTrigger: Model not found for instance")
-        return
-    end
-    for _, p in ipairs(m:GetDescendants()) do
-        if p:IsA("BasePart") then
-            p.CanCollide = false
-            p.Massless = true
-        end
-    end
-    m:PivotTo(hrp.CFrame * CFrame.new(0,0,-2))
-    task.wait(0.05)
-    local prompt = m:FindFirstChildOfClass("ProximityPrompt") or m:FindFirstChildWhichIsA("ProximityPrompt", true)
-    if prompt then
-        prompt.MaxActivationDistance = 15
-        prompt.RequiresLineOfSight = false
-        prompt:InputHoldBegin()
-        task.wait(prompt.HoldDuration + 0.05)
-        prompt:InputHoldEnd()
-        VirtualInputManager:SendKeyEvent(true, "E", false, game)
-        task.wait(0.05)
-        VirtualInputManager:SendKeyEvent(false, "E", false, game)
-        print("[Debug] bringBtnAndTrigger: triggered button", m.Name)
-    else
-        print("[Debug] bringBtnAndTrigger: ProximityPrompt not found in button", m.Name)
-    end
 end
 
 -- Auto Debris Collector
@@ -457,7 +429,12 @@ task.spawn(function()
                 and Workspace.Map.Tycoons:FindFirstChild(plr.Name)
             if myTycoon then
                 local cands = gatherCands(myTycoon)
-                if #cands > 0 then bringBtnAndTrigger(cands[1]) end
+                if #cands > 0 then
+                    print("[Debug] MainLoop: found valid buttons count:", #cands)
+                    -- Button interaction disabled, as requested
+                else
+                    print("[Debug] MainLoop: no valid buttons found")
+                end
             else
                 print("[Debug] MainLoop: Player tycoon not found")
             end
