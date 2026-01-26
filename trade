@@ -2,12 +2,15 @@
 -- Units sold = floor(AI net income * TradePercent / unit sell price)
 -- AI net income = Revenue.Total - Expenses.Total (attributes)
 -- Rule: if their net is negative (deficit), DO NOT send a trade
+-- Rule: target must have at least 1 city in workspace.Baseplate.Cities.<CountryName>
+-- Rule: non-consumer goods resources are capped at 5 units per trade
 -- Only safety: do not sell if our resource Flow is negative
 -- No flow cap
 -- Multiplier fixed at 1
 -- Acceptance check: myCountry.Resources[Resource].Trade[TargetName] exists after attempt
 -- Adds cooldown so it doesn't retry rejected targets
 -- UI: TradePercent slider (0% -> 80%), Attempting shows units+resource+country, Valid list, Live TradeExport, Unload
+-- Loop Delay slider: 0.0 -> 10.0 in 0.1 increments
 
 local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
@@ -26,6 +29,10 @@ local ManageAlliance = GameManager:WaitForChild("ManageAlliance")
 
 local Assets = ReplicatedStorage:WaitForChild("Assets")
 local Resources = Assets:WaitForChild("Resources")
+
+-- City ownership folder (must exist + have >= 1 child)
+local Baseplate = workspace:WaitForChild("Baseplate")
+local CitiesRoot = Baseplate:WaitForChild("Cities")
 
 local CONFIG = {
 	Enabled = false,
@@ -53,6 +60,14 @@ local function log(...)
 	if CONFIG.Debug then
 		print("[AutoTrade]", ...)
 	end
+end
+
+local function countryHasAtLeastOneCity(countryName)
+	local folder = CitiesRoot:FindFirstChild(countryName)
+	if not folder then
+		return false
+	end
+	return #folder:GetChildren() >= 1
 end
 
 local function getMyCountryFolder()
@@ -155,6 +170,7 @@ local function getNetIncome(country)
 	return rev - exp
 end
 
+-- Non-consumer goods capped at 5 units
 local function computeUnitsFromNet(netIncome, unitSellPrice)
 	if type(netIncome) ~= "number" or netIncome <= 0 then
 		return 0
@@ -167,8 +183,14 @@ local function computeUnitsFromNet(netIncome, unitSellPrice)
 		units = CONFIG.MinUnits
 	end
 
-	if units > CONFIG.MaxUnitsAbsolute then
-		units = CONFIG.MaxUnitsAbsolute
+	if CONFIG.ResourceName ~= "Consumer Goods" then
+		if units > 5 then
+			units = 5
+		end
+	else
+		if units > CONFIG.MaxUnitsAbsolute then
+			units = CONFIG.MaxUnitsAbsolute
+		end
 	end
 
 	return units
@@ -334,10 +356,11 @@ Left:AddSlider("TargetPercent", {
 	CONFIG.TargetPercent = v / 100
 end)
 
+-- 0.0 -> 10.0 in 0.1 steps
 Left:AddSlider("Delay", {
 	Text = "Loop Delay",
 	Default = 2,
-	Min = 1,
+	Min = 0,
 	Max = 10,
 	Rounding = 1,
 	Suffix = "s"
@@ -405,14 +428,14 @@ local function getValidCandidates(myCountry, resource, unitSellPrice)
 	local valid = {}
 
 	for _, target in ipairs(CountryData:GetChildren()) do
-		if target ~= myCountry and isAICountry(target) then
+		if target ~= myCountry and isAICountry(target) and countryHasAtLeastOneCity(target.Name) then
 			if not hasTradeWith(myCountry, resource, target.Name) then
 				if not shouldSkipTargetSlot(target, resource) then
 					if not isOnCooldown(target.Name) then
 						if not PendingAttempts[target.Name] then
 							local net = getNetIncome(target)
 
-							-- NEW RULE: if their net is negative, don't send a trade
+							-- if their net is negative, don't trade
 							if net and net > 0 then
 								local units = computeUnitsFromNet(net, unitSellPrice)
 								if units >= CONFIG.MinUnits then
