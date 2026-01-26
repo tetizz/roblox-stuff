@@ -1,6 +1,7 @@
 -- Rise of Nations - Auto AI Trading (Owner Version)
--- Units sold = floor(abs(AI net income) * TradePercent / unit sell price)
+-- Units sold = floor(AI net income * TradePercent / unit sell price)
 -- AI net income = Revenue.Total - Expenses.Total (attributes)
+-- Rule: if their net is negative (deficit), DO NOT send a trade
 -- Only safety: do not sell if our resource Flow is negative
 -- No flow cap
 -- Multiplier fixed at 1
@@ -154,12 +155,12 @@ local function getNetIncome(country)
 	return rev - exp
 end
 
-local function computeOptimizedUnitsFromNet(netIncome, unitSellPrice)
-	if type(netIncome) ~= "number" or netIncome >= 0 then
+local function computeUnitsFromNet(netIncome, unitSellPrice)
+	if type(netIncome) ~= "number" or netIncome <= 0 then
 		return 0
 	end
 
-	local targetMoney = math.abs(netIncome) * CONFIG.TargetPercent
+	local targetMoney = netIncome * CONFIG.TargetPercent
 	local units = math.floor(targetMoney / (unitSellPrice * CONFIG.Multiplier))
 
 	if units < CONFIG.MinUnits then
@@ -398,7 +399,7 @@ ThemeManager:LoadDefault()
 SaveManager:LoadAutoloadConfig()
 
 --============================================================
--- Core: One attempt per loop (prevents spam + enables reject detection)
+-- Core: One attempt per loop
 --============================================================
 local function getValidCandidates(myCountry, resource, unitSellPrice)
 	local valid = {}
@@ -410,8 +411,10 @@ local function getValidCandidates(myCountry, resource, unitSellPrice)
 					if not isOnCooldown(target.Name) then
 						if not PendingAttempts[target.Name] then
 							local net = getNetIncome(target)
-							if net and net < 0 then
-								local units = computeOptimizedUnitsFromNet(net, unitSellPrice)
+
+							-- NEW RULE: if their net is negative, don't send a trade
+							if net and net > 0 then
+								local units = computeUnitsFromNet(net, unitSellPrice)
 								if units >= CONFIG.MinUnits then
 									valid[#valid + 1] = {
 										name = target.Name,
@@ -428,7 +431,7 @@ local function getValidCandidates(myCountry, resource, unitSellPrice)
 	end
 
 	table.sort(valid, function(a, b)
-		return math.abs(a.net) > math.abs(b.net)
+		return a.net > b.net
 	end)
 
 	return valid
@@ -546,4 +549,3 @@ task.spawn(function()
 end)
 
 Library:Notify("Auto AI Trader loaded! (RightShift toggles UI)", 4)
-
