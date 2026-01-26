@@ -1,12 +1,13 @@
--- Rise of Nations - Auto AI Trading
--- Rule: Units sold = floor(abs(AI net income) * 80% / unit sell price)
+-- Rise of Nations - Auto AI Trading (Owner Version)
+-- Units sold = floor(abs(AI net income) * 80% / unit sell price)
 -- AI net income = Revenue.Total - Expenses.Total (attributes)
 -- Only safety: do not sell if our resource Flow is negative
+-- No flow cap
 -- Multiplier fixed at 1
--- Max partners = 100
--- Consumer Goods ignores occupied trade slots
--- Live Trade Income: Economy.Revenue.TradeExport
--- UI: RightShift toggle + Unload UI button
+-- Max partners default = 100
+-- Acceptance check: myCountry.Resources[Resource].Trade[TargetName] exists after attempt
+-- Adds cooldown so it doesn't retry rejected targets
+-- UI: Attempting + Valid countries list + Live TradeExport + Unload
 
 local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
@@ -41,6 +42,10 @@ local CONFIG = {
 	MaxUnitsAbsolute = 999,
 
 	SkipIfTargetSlotOccupied = true,
+
+	AttemptCheckDelay = 1.5,
+	CooldownSeconds = 120,
+
 	Debug = true
 }
 
@@ -201,57 +206,33 @@ local function getTradeIncome(country)
 	return tradeExport.Value
 end
 
-local function runOnceBestFirst()
-	local ok, myCountry = assertStillLeader()
-	if not ok then return end
+local function tradeExists(myCountry, resource, targetName)
+	local trade = getTradeFolder(myCountry, resource)
+	if not trade then return false end
+	return trade:FindFirstChild(targetName) ~= nil
+end
 
-	if not isFlowNonNegative(myCountry, CONFIG.ResourceName) then
-		log("Stopped: flow is negative for " .. CONFIG.ResourceName)
-		return
-	end
+--============================================================
+-- Cooldowns / Attempt memory
+--============================================================
+local Cooldowns = {}
+local PendingAttempts = {}
 
-	if getTradeCount(myCountry, CONFIG.ResourceName) >= CONFIG.MaxPartnersPerResource then
-		return
-	end
+local function now()
+	return os.clock()
+end
 
-	local price = getUnitSellPrice(CONFIG.ResourceName)
-	if not price then return end
+local function isOnCooldown(name)
+	local t = Cooldowns[name]
+	return t and t > now()
+end
 
-	local candidates = {}
+local function setCooldown(name)
+	Cooldowns[name] = now() + CONFIG.CooldownSeconds
+end
 
-	for _, target in ipairs(CountryData:GetChildren()) do
-		if target ~= myCountry and isAICountry(target) then
-			if not hasTradeWith(myCountry, CONFIG.ResourceName, target.Name) then
-				if not shouldSkipTargetSlot(target, CONFIG.ResourceName) then
-					local net = getNetIncome(target)
-					if net and net < 0 then
-						table.insert(candidates, {
-							country = target,
-							netIncome = net
-						})
-					end
-				end
-			end
-		end
-	end
-
-	table.sort(candidates, function(a, b)
-		return math.abs(a.netIncome) > math.abs(b.netIncome)
-	end)
-
-	for _, data in ipairs(candidates) do
-		if getTradeCount(myCountry, CONFIG.ResourceName) >= CONFIG.MaxPartnersPerResource then
-			break
-		end
-
-		local target = data.country
-		local units = computeOptimizedUnitsFromNet(data.netIncome, price)
-
-		if units >= CONFIG.MinUnits then
-			sendTrade(target.Name, CONFIG.ResourceName, units)
-			log("Sent", units, CONFIG.ResourceName, "to", target.Name, "(net:", data.netIncome .. ")")
-		end
-	end
+local function clearCooldown(name)
+	Cooldowns[name] = nil
 end
 
 --============================================================
@@ -283,6 +264,35 @@ local CountryLabel = Right:AddLabel("Country: ?")
 local PartnerLabel = Right:AddLabel("Partners: ?")
 local FlowLabel = Right:AddLabel("Flow: ?")
 local TradeIncomeLabel = Right:AddLabel("Trade Income: ?")
+
+local AttemptingLabel = Right:AddLabel("Attempting to trade with: (none)")
+local ValidLabel = Right:AddLabel("Valid countries: 0")
+local ValidListLabel = Right:AddLabel("Valid list: (none)")
+
+local function setAttempting(name)
+	AttemptingLabel:SetText("Attempting to trade with: " .. tostring(name))
+end
+
+local function setValidList(names)
+	ValidLabel:SetText("Valid countries: " .. tostring(#names))
+
+	local maxShow = 12
+	local shown = {}
+	for i = 1, math.min(#names, maxShow) do
+		shown[#shown + 1] = names[i]
+	end
+
+	local suffix = ""
+	if #names > maxShow then
+		suffix = " ... +" .. tostring(#names - maxShow)
+	end
+
+	if #shown == 0 then
+		ValidListLabel:SetText("Valid list: (none)")
+	else
+		ValidListLabel:SetText("Valid list: " .. table.concat(shown, ", ") .. suffix)
+	end
+end
 
 Left:AddToggle("Enabled", {
 	Text = "Enable Auto Trading",
@@ -331,8 +341,21 @@ Left:AddSlider("MaxPartners", {
 	CONFIG.MaxPartnersPerResource = v
 end)
 
+Left:AddSlider("Cooldown", {
+	Text = "Reject Cooldown",
+	Default = 120,
+	Min = 10,
+	Max = 600,
+	Rounding = 0,
+	Suffix = "s"
+}):OnChanged(function(v)
+	CONFIG.CooldownSeconds = v
+end)
+
 Left:AddButton("Run Once", function()
-	runOnceBestFirst()
+	-- handled by loop; keeping button for manual kick
+	CONFIG.Enabled = true
+	Toggles.Enabled:SetValue(true)
 end)
 
 Left:AddButton("Unload UI", function()
@@ -363,7 +386,117 @@ ThemeManager:LoadDefault()
 SaveManager:LoadAutoloadConfig()
 
 --============================================================
--- Loop
+-- Core: One attempt per tick (prevents spam + enables reject detection)
+--============================================================
+local function getValidCandidates(myCountry, resource, unitSellPrice)
+	local valid = {}
+
+	for _, target in ipairs(CountryData:GetChildren()) do
+		if target ~= myCountry and isAICountry(target) then
+			if not hasTradeWith(myCountry, resource, target.Name) then
+				if not shouldSkipTargetSlot(target, resource) then
+					if not isOnCooldown(target.Name) then
+						if not PendingAttempts[target.Name] then
+							local net = getNetIncome(target)
+							if net and net < 0 then
+								local units = computeOptimizedUnitsFromNet(net, unitSellPrice)
+								if units >= CONFIG.MinUnits then
+									valid[#valid + 1] = {
+										name = target.Name,
+										net = net,
+										units = units
+									}
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	table.sort(valid, function(a, b)
+		return math.abs(a.net) > math.abs(b.net)
+	end)
+
+	return valid
+end
+
+local function attemptOneTrade()
+	local ok, myCountry = assertStillLeader()
+	if not ok then
+		setAttempting("(none)")
+		setValidList({})
+		return
+	end
+
+	if not isFlowNonNegative(myCountry, CONFIG.ResourceName) then
+		log("Stopped: flow is negative for " .. CONFIG.ResourceName)
+		setAttempting("(flow negative)")
+		setValidList({})
+		return
+	end
+
+	if getTradeCount(myCountry, CONFIG.ResourceName) >= CONFIG.MaxPartnersPerResource then
+		setAttempting("(max partners reached)")
+		setValidList({})
+		return
+	end
+
+	local price = getUnitSellPrice(CONFIG.ResourceName)
+	if not price then
+		setAttempting("(no price)")
+		setValidList({})
+		return
+	end
+
+	local candidates = getValidCandidates(myCountry, CONFIG.ResourceName, price)
+
+	local namesOnly = {}
+	for i = 1, #candidates do
+		namesOnly[i] = candidates[i].name
+	end
+	setValidList(namesOnly)
+
+	local pick = candidates[1]
+	if not pick then
+		setAttempting("(none)")
+		return
+	end
+
+	setAttempting(pick.name)
+
+	PendingAttempts[pick.name] = {
+		resource = CONFIG.ResourceName,
+		when = now(),
+		units = pick.units
+	}
+
+	sendTrade(pick.name, CONFIG.ResourceName, pick.units)
+	log("Attempted", pick.units, CONFIG.ResourceName, "to", pick.name, "(net:", pick.net .. ")")
+
+	task.delay(CONFIG.AttemptCheckDelay, function()
+		local ok2, myCountry2 = assertStillLeader()
+		if not ok2 then
+			PendingAttempts[pick.name] = nil
+			return
+		end
+
+		local accepted = tradeExists(myCountry2, CONFIG.ResourceName, pick.name)
+		if accepted then
+			clearCooldown(pick.name)
+			log("Accepted:", pick.name)
+		else
+			setCooldown(pick.name)
+			log("Rejected/Failed:", pick.name, "-> cooldown", CONFIG.CooldownSeconds .. "s")
+		end
+
+		PendingAttempts[pick.name] = nil
+	end)
+end
+
+--============================================================
+-- Loop (UI + trading)
 --============================================================
 task.spawn(function()
 	while true do
@@ -384,10 +517,13 @@ task.spawn(function()
 			PartnerLabel:SetText("Partners: ?")
 			FlowLabel:SetText("Flow: ?")
 			TradeIncomeLabel:SetText("Trade Income: ?")
+			AttemptingLabel:SetText("Attempting to trade with: (none)")
+			ValidLabel:SetText("Valid countries: 0")
+			ValidListLabel:SetText("Valid list: (none)")
 		end
 
 		if CONFIG.Enabled then
-			runOnceBestFirst()
+			attemptOneTrade()
 		end
 
 		task.wait(CONFIG.DelaySeconds)
