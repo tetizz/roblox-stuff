@@ -32,7 +32,7 @@ local CONFIG = {
 	ResourceName = "Consumer Goods",
 	Mode = "Sell",
 
-	TargetPercent = 0.80,
+	TargetPercent = 0.79,
 	Multiplier = 1,
 
 	DelaySeconds = 2,
