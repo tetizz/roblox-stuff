@@ -1,6 +1,8 @@
 -- Rise of Nations - Auto AI Trading
--- Locked: TargetPercent = 80%, Multiplier = 1
--- Flow capped (never exceed production)
+-- Rule: Units sold = floor(abs(AI net income) * 80% / unit sell price)
+-- AI net income = Revenue.Total - Expenses.Total (attributes)
+-- Only safety: do not sell if our resource Flow is negative
+-- Multiplier fixed at 1
 -- Max partners = 100
 -- Consumer Goods ignores occupied trade slots
 -- Live Trade Income: Economy.Revenue.TradeExport
@@ -35,9 +37,8 @@ local CONFIG = {
 	DelaySeconds = 2,
 	MaxPartnersPerResource = 100,
 
-	FlowSafetyMultiplier = 0.9,
-	MaxUnitsAbsolute = 999,
 	MinUnits = 1,
+	MaxUnitsAbsolute = 999,
 
 	SkipIfTargetSlotOccupied = true,
 	Debug = true
@@ -70,19 +71,6 @@ end
 local function isAICountry(country)
 	local leader = country:FindFirstChild("Leader")
 	return leader and string.find(leader.Value, "AI") ~= nil
-end
-
-local function getBalance(country)
-	local econ = country:FindFirstChild("Economy")
-	if not econ then return end
-	local bal = econ:FindFirstChild("Balance")
-	return bal and bal.Value
-end
-
-local function getUnitSellPrice(resource)
-	local v = Resources:FindFirstChild(resource)
-	if not v then return end
-	return v.Value * 0.8
 end
 
 local function getTradeFolder(country, resource)
@@ -123,22 +111,52 @@ local function getMyFlow(country, resource)
 	return flow and flow.Value
 end
 
-local function computeSupplyCapUnits(country, resource)
+local function isFlowNonNegative(country, resource)
 	local flow = getMyFlow(country, resource)
-	if not flow then
-		return CONFIG.MaxUnitsAbsolute
+	if type(flow) ~= "number" then
+		return true
 	end
-
-	local cap = math.floor(flow * CONFIG.FlowSafetyMultiplier)
-	if cap < 0 then cap = 0 end
-
-	return math.min(cap, CONFIG.MaxUnitsAbsolute)
+	return flow >= 0
 end
 
-local function computeOptimizedUnits(balance, price)
-	local deficit = math.abs(balance)
-	local targetMoney = deficit * CONFIG.TargetPercent
-	local units = math.floor(targetMoney / price)
+local function getUnitSellPrice(resource)
+	local v = Resources:FindFirstChild(resource)
+	if not v then return end
+	return v.Value * 0.8
+end
+
+local function getRevenueTotal(country)
+	local econ = country:FindFirstChild("Economy")
+	if not econ then return end
+	local revenue = econ:FindFirstChild("Revenue")
+	if not revenue then return end
+	return revenue:GetAttribute("Total")
+end
+
+local function getExpensesTotal(country)
+	local econ = country:FindFirstChild("Economy")
+	if not econ then return end
+	local expenses = econ:FindFirstChild("Expenses")
+	if not expenses then return end
+	return expenses:GetAttribute("Total")
+end
+
+local function getNetIncome(country)
+	local rev = getRevenueTotal(country)
+	local exp = getExpensesTotal(country)
+	if type(rev) ~= "number" or type(exp) ~= "number" then
+		return
+	end
+	return rev - exp
+end
+
+local function computeOptimizedUnitsFromNet(netIncome, unitSellPrice)
+	if type(netIncome) ~= "number" or netIncome >= 0 then
+		return 0
+	end
+
+	local targetMoney = math.abs(netIncome) * CONFIG.TargetPercent
+	local units = math.floor(targetMoney / (unitSellPrice * CONFIG.Multiplier))
 
 	if units < CONFIG.MinUnits then
 		units = CONFIG.MinUnits
@@ -187,26 +205,29 @@ local function runOnceBestFirst()
 	local ok, myCountry = assertStillLeader()
 	if not ok then return end
 
+	if not isFlowNonNegative(myCountry, CONFIG.ResourceName) then
+		log("Stopped: flow is negative for " .. CONFIG.ResourceName)
+		return
+	end
+
+	if getTradeCount(myCountry, CONFIG.ResourceName) >= CONFIG.MaxPartnersPerResource then
+		return
+	end
+
 	local price = getUnitSellPrice(CONFIG.ResourceName)
 	if not price then return end
-
-	local partners = getTradeCount(myCountry, CONFIG.ResourceName)
-	if partners >= CONFIG.MaxPartnersPerResource then return end
-
-	local supplyCap = computeSupplyCapUnits(myCountry, CONFIG.ResourceName)
-	if supplyCap <= 0 then return end
 
 	local candidates = {}
 
 	for _, target in ipairs(CountryData:GetChildren()) do
 		if target ~= myCountry and isAICountry(target) then
-			local bal = getBalance(target)
-			if bal and bal < 0 then
-				if not hasTradeWith(myCountry, CONFIG.ResourceName, target.Name) then
-					if not shouldSkipTargetSlot(target, CONFIG.ResourceName) then
+			if not hasTradeWith(myCountry, CONFIG.ResourceName, target.Name) then
+				if not shouldSkipTargetSlot(target, CONFIG.ResourceName) then
+					local net = getNetIncome(target)
+					if net and net < 0 then
 						table.insert(candidates, {
 							country = target,
-							deficit = math.abs(bal)
+							netIncome = net
 						})
 					end
 				end
@@ -215,27 +236,20 @@ local function runOnceBestFirst()
 	end
 
 	table.sort(candidates, function(a, b)
-		return a.deficit > b.deficit
+		return math.abs(a.netIncome) > math.abs(b.netIncome)
 	end)
 
-	local remaining = supplyCap
-
 	for _, data in ipairs(candidates) do
-		if remaining <= 0 then break end
-
 		if getTradeCount(myCountry, CONFIG.ResourceName) >= CONFIG.MaxPartnersPerResource then
 			break
 		end
 
 		local target = data.country
-
-		local units = computeOptimizedUnits(-data.deficit, price)
-		units = math.min(units, remaining)
+		local units = computeOptimizedUnitsFromNet(data.netIncome, price)
 
 		if units >= CONFIG.MinUnits then
 			sendTrade(target.Name, CONFIG.ResourceName, units)
-			remaining -= units
-			log("Sent", units, CONFIG.ResourceName, "to", target.Name)
+			log("Sent", units, CONFIG.ResourceName, "to", target.Name, "(net:", data.netIncome .. ")")
 		end
 	end
 end
@@ -266,8 +280,8 @@ local Options = Library.Options
 
 local StatusLabel = Right:AddLabel("Status: Idle")
 local CountryLabel = Right:AddLabel("Country: ?")
-local SupplyLabel = Right:AddLabel("Supply Cap: ?")
 local PartnerLabel = Right:AddLabel("Partners: ?")
+local FlowLabel = Right:AddLabel("Flow: ?")
 local TradeIncomeLabel = Right:AddLabel("Trade Income: ?")
 
 Left:AddToggle("Enabled", {
@@ -305,17 +319,6 @@ Left:AddSlider("Delay", {
 	Suffix = "s"
 }):OnChanged(function(v)
 	CONFIG.DelaySeconds = v
-end)
-
-Left:AddSlider("FlowSafety", {
-	Text = "Flow Safety %",
-	Default = 90,
-	Min = 50,
-	Max = 100,
-	Rounding = 0,
-	Suffix = "%"
-}):OnChanged(function(v)
-	CONFIG.FlowSafetyMultiplier = v / 100
 end)
 
 Left:AddSlider("MaxPartners", {
@@ -368,18 +371,18 @@ task.spawn(function()
 		if ok then
 			CountryLabel:SetText("Country: " .. myCountry.Name)
 
-			local cap = computeSupplyCapUnits(myCountry, CONFIG.ResourceName)
-			SupplyLabel:SetText("Supply Cap: " .. tostring(cap))
-
 			local partners = getTradeCount(myCountry, CONFIG.ResourceName)
 			PartnerLabel:SetText("Partners: " .. tostring(partners))
+
+			local flow = getMyFlow(myCountry, CONFIG.ResourceName)
+			FlowLabel:SetText("Flow: " .. tostring(flow))
 
 			local tradeIncome = getTradeIncome(myCountry)
 			TradeIncomeLabel:SetText("Trade Income: " .. tostring(tradeIncome))
 		else
 			CountryLabel:SetText("Country: (not leader)")
-			SupplyLabel:SetText("Supply Cap: ?")
 			PartnerLabel:SetText("Partners: ?")
+			FlowLabel:SetText("Flow: ?")
 			TradeIncomeLabel:SetText("Trade Income: ?")
 		end
 
@@ -392,3 +395,4 @@ task.spawn(function()
 end)
 
 Library:Notify("Auto AI Trader loaded! (RightShift toggles UI)", 4)
+
