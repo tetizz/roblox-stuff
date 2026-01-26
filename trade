@@ -6,7 +6,7 @@
 -- Multiplier fixed at 1
 -- Acceptance check: myCountry.Resources[Resource].Trade[TargetName] exists after attempt
 -- Adds cooldown so it doesn't retry rejected targets
--- UI: TradePercent slider (0% -> 80%), Attempting + Valid list + Live TradeExport + Unload
+-- UI: TradePercent slider (0% -> 80%), Attempting shows units+resource+country, Valid list, Live TradeExport, Unload
 
 local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
@@ -265,12 +265,14 @@ local FlowLabel = Right:AddLabel("Flow: ?")
 local TradeIncomeLabel = Right:AddLabel("Trade Income: ?")
 local PercentLabel = Right:AddLabel("Trade Percent: ?")
 
-local AttemptingLabel = Right:AddLabel("Attempting to trade with: (none)")
+local AttemptingLabel = Right:AddLabel("Attempting to trade: (none)")
 local ValidLabel = Right:AddLabel("Valid countries: 0")
 local ValidListLabel = Right:AddLabel("Valid list: (none)")
 
-local function setAttempting(name)
-	AttemptingLabel:SetText("Attempting to trade with: " .. tostring(name))
+local function setAttempting(resource, units, name)
+	AttemptingLabel:SetText(
+		"Attempting to trade " .. tostring(units) .. " " .. tostring(resource) .. " to " .. tostring(name)
+	)
 end
 
 local function setValidList(names)
@@ -435,27 +437,27 @@ end
 local function attemptOneTrade()
 	local ok, myCountry = assertStillLeader()
 	if not ok then
-		setAttempting("(none)")
+		AttemptingLabel:SetText("Attempting to trade: (not leader)")
 		setValidList({})
 		return
 	end
 
 	if not isFlowNonNegative(myCountry, CONFIG.ResourceName) then
 		log("Stopped: flow is negative for " .. CONFIG.ResourceName)
-		setAttempting("(flow negative)")
+		AttemptingLabel:SetText("Attempting to trade: (flow negative)")
 		setValidList({})
 		return
 	end
 
 	if getTradeCount(myCountry, CONFIG.ResourceName) >= CONFIG.MaxPartnersPerResource then
-		setAttempting("(max partners reached)")
+		AttemptingLabel:SetText("Attempting to trade: (max partners reached)")
 		setValidList({})
 		return
 	end
 
 	local price = getUnitSellPrice(CONFIG.ResourceName)
 	if not price then
-		setAttempting("(no price)")
+		AttemptingLabel:SetText("Attempting to trade: (no price)")
 		setValidList({})
 		return
 	end
@@ -470,11 +472,11 @@ local function attemptOneTrade()
 
 	local pick = candidates[1]
 	if not pick then
-		setAttempting("(none)")
+		AttemptingLabel:SetText("Attempting to trade: (none)")
 		return
 	end
 
-	setAttempting(pick.name)
+	setAttempting(CONFIG.ResourceName, pick.units, pick.name)
 
 	PendingAttempts[pick.name] = {
 		resource = CONFIG.ResourceName,
@@ -530,7 +532,7 @@ task.spawn(function()
 			FlowLabel:SetText("Flow: ?")
 			TradeIncomeLabel:SetText("Trade Income: ?")
 			PercentLabel:SetText("Trade Percent: ?")
-			AttemptingLabel:SetText("Attempting to trade with: (none)")
+			AttemptingLabel:SetText("Attempting to trade: (none)")
 			ValidLabel:SetText("Valid countries: 0")
 			ValidListLabel:SetText("Valid list: (none)")
 		end
@@ -544,3 +546,4 @@ task.spawn(function()
 end)
 
 Library:Notify("Auto AI Trader loaded! (RightShift toggles UI)", 4)
+
