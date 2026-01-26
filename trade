@@ -1,217 +1,530 @@
--- Advanced Trading
--- Only net-income based sales, 2s between trades, 5-unit cap if AI flow=0 except Consumer Goods
+--// Rise of Nations - Auto AI Trading (Obsidian UI + Best-First Backend)
 
--- 1) Load Obsidian UI
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
-local Window = Library:CreateWindow({
- Title = "Advanced Trading",
- Footer = "v1.0.0",
- ToggleKeybind = Enum.KeyCode.RightControl,
- Center = true,
- AutoShow = true,
-})
+--============================================================
+-- Obsidian (repo loader)
+--============================================================
+local repo         = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local Library      = loadstring(game:HttpGet(repo .. "Library.lua"))()
+local SaveManager  = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
 
--- 2) Services & Player
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService        = game:GetService("RunService")
-local StarterGui        = game:GetService("StarterGui")
+--============================================================
+-- Services (aligned)
+--============================================================
 local Players           = game:GetService("Players")
-local player            = Players.LocalPlayer
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local workspace         = game:GetService("Workspace")
 
+--============================================================
+-- Game Refs
+--============================================================
+local LocalPlayer    = Players.LocalPlayer
+local CountryData    = workspace:WaitForChild("CountryData")
 local GameManager    = workspace:WaitForChild("GameManager")
 local ManageAlliance = GameManager:WaitForChild("ManageAlliance")
 
--- 3) Price Table (sell only)
-local Prices = {
- Iron = 30400,
- Aluminum = 30400,
- Oil = 32000,
- Phosphate = 33200,
- Copper = 33600,
- Chromium = 38000,
- Gold = 43200,
- Diamond = 69600,
- Tungsten = 76800,
- Titanium = 81600,
- Uranium = 420000,
- Steel = 60000,
- ["Consumer Goods"] = 65920,
- Fertilizer = 67200,
- ["Motor Parts"] = 73600,
- Electronics = 81600,
- ["Aircraft Parts"] = 83200,
- ["Enriched Uranium"] = 96000000,
+local Assets         = ReplicatedStorage:WaitForChild("Assets")
+local Resources      = Assets:WaitForChild("Resources")
+
+--============================================================
+-- CONFIG
+--============================================================
+local CONFIG = {
+	Enabled                  = false,
+
+	ResourceName             = "Consumer Goods",
+	Mode                     = "Sell",
+	TargetPercent            = 0.80,
+	Multiplier               = 1,
+
+	DelaySeconds             = 2.0,
+	MaxPartnersPerResource   = 10,
+
+	ResourceReserveUnits     = 25,
+	CapByFlow                = true,
+	FlowSafetyMultiplier     = 0.90,
+	MaxUnitsAbsolute         = 999,
+	MinUnits                 = 1,
+
+	SkipIfTargetSlotOccupied = true,
+	Debug                    = true,
 }
 
--- 4) Configurable constants
-local MIN_POST_NET = 1000  -- AI retains ≥ this net income after trade
-local TRADE_DELAY  = 2     -- seconds between each individual trade
-
--- 5) State
-local selectedResources = {}
-local tradingEnabled    = false
-local processingAI      = false    -- prevent overlapping
-local aiList, aiIndex, connection
-
--- 6) Helpers
-local function sumFolder(folder)
- local total = 0
- for _, v in ipairs(folder:GetChildren()) do
-  if v:IsA("NumberValue") then total = total + v.Value end
- end
- return total
+--============================================================
+-- Backend Helpers
+--============================================================
+local function log(...)
+	if CONFIG.Debug then
+		print("[AutoTrade]", ...)
+	end
 end
 
-local function isAICountry(c)
- local l = c:FindFirstChild("Leader")
- return l and l.Value == (c.Name .. "AI")
+local function getMyCountryFolder(): Instance?
+	local myName = LocalPlayer.Name
+	for _, countryFolder in ipairs(CountryData:GetChildren()) do
+		local leader = countryFolder:FindFirstChild("Leader")
+		if leader and leader:IsA("StringValue") and leader.Value == myName then
+			return countryFolder
+		end
+	end
+	return nil
 end
 
-local function getAICountries()
- local list = {}
- for _, c in ipairs(workspace.CountryData:GetChildren()) do
-  if isAICountry(c) then table.insert(list, c.Name) end
- end
- return list
+local function assertStillLeader(): (boolean, Instance?)
+	local myCountry = getMyCountryFolder()
+	if not myCountry then
+		return false, nil
+	end
+	return true, myCountry
 end
 
--- 7) Core trading logic (net-income only)
-local function sellToAI(myCountry, resName, aiName)
- local price = Prices[resName]
- if not price then return end
-
- local econ = workspace.CountryData:FindFirstChild(aiName)
-             and workspace.CountryData[aiName]:FindFirstChild("Economy")
- if not econ then return end
-
- -- Debt check
- local balance = econ:FindFirstChild("Balance") and econ.Balance.Value or 0
- if balance < 0 then return end
-
- -- Net income = sum(Revenue) - sum(Expenses)
- local net = 0
- if econ:FindFirstChild("Revenue")  then net = sumFolder(econ.Revenue) end
- if econ:FindFirstChild("Expenses") then net = net - sumFolder(econ.Expenses) end
- if net <= MIN_POST_NET then return end
-
- -- Calculate max by net
- local allowedValue = net - MIN_POST_NET
- local amt = allowedValue / price
- if amt <= 0 then return end
-
- -- 5-unit cap if AI flow=0 and not Consumer Goods
- local aiRes = workspace.CountryData[aiName]:FindFirstChild("Resources")
-               and workspace.CountryData[aiName].Resources:FindFirstChild(resName)
- if aiRes and aiRes:FindFirstChild("Flow") and aiRes.Flow.Value <= 0
-    and resName ~= "Consumer Goods" then
-  amt = math.min(amt, 5)
- end
-
- -- Minimum $1
- local value = amt * price
- if value < 1 then return end
-
- -- Debug print of args
- print("→ FireServer:", aiName, "ResourceTrade", resName, "Sell", amt, 1, "Trade")
- ManageAlliance:FireServer(aiName, "ResourceTrade", {resName, "Sell", amt, 1, "Trade"})
+local function isAICountry(countryFolder: Instance): boolean
+	local leader = countryFolder:FindFirstChild("Leader")
+	if not leader or not leader:IsA("StringValue") then
+		return false
+	end
+	return string.find(leader.Value, "AI") ~= nil
 end
 
--- 8) Sell all selected to one AI (with delay)
-local function sellAllToAI(myCountry, aiName)
- for resName in pairs(selectedResources) do
-  sellToAI(myCountry, resName, aiName)
-  task.wait(TRADE_DELAY)
- end
+local function getBalance(countryFolder: Instance): number?
+	local econ = countryFolder:FindFirstChild("Economy")
+	if not econ then return nil end
+
+	local bal = econ:FindFirstChild("Balance")
+	if not bal or not bal:IsA("NumberValue") then return nil end
+
+	return bal.Value
 end
 
--- 9) Heartbeat loop: one AI at a time
-local function heartbeat()
- if not tradingEnabled or processingAI then return end
- processingAI = true
-
- -- Identify your country
- local myCountry
- for _, c in ipairs(workspace.CountryData:GetChildren()) do
-  if c.Leader and c.Leader.Value == player.Name then
-   myCountry = c
-   break
-  end
- end
- if not myCountry then
-  processingAI = false
-  return
- end
-
- -- Done?
- if aiIndex > #aiList then
-  tradingEnabled = false
-  connection:Disconnect()
-  StarterGui:SetCore("SendNotification", {
-   Title = "Trade Complete",
-   Text = "All AI processed.",
-   Duration = 5,
-  })
-  processingAI = false
-  return
- end
-
- -- Process next AI
- local aiName = aiList[aiIndex]
- print("► Processing AI:", aiName)
- sellAllToAI(myCountry, aiName)
-
- -- proper increment
- aiIndex = aiIndex + 1
-
- task.wait(TRADE_DELAY)
- processingAI = false
+local function getUnitSellPrice(resourceName: string): number?
+	local v = Resources:FindFirstChild(resourceName)
+	if not v or not v:IsA("NumberValue") then
+		return nil
+	end
+	return v.Value * 0.80
 end
 
--- 10) Start / Stop
-local function startTrading()
- aiList, aiIndex = getAICountries(), 1
- if connection then connection:Disconnect() end
- connection = RunService.Heartbeat:Connect(heartbeat)
+local function getTradeFolder(countryFolder: Instance, resourceName: string): Instance?
+	local resFolder = countryFolder:FindFirstChild("Resources")
+	if not resFolder then return nil end
+
+	local resObj = resFolder:FindFirstChild(resourceName)
+	if not resObj then return nil end
+
+	local trade = resObj:FindFirstChild("Trade")
+	if trade and trade:IsA("Folder") then
+		return trade
+	end
+	return nil
 end
 
-local function stopTrading()
- tradingEnabled = false
- if connection then connection:Disconnect() end
+local function getTradeCount(countryFolder: Instance, resourceName: string): number
+	local trade = getTradeFolder(countryFolder, resourceName)
+	return trade and #trade:GetChildren() or 0
 end
 
--- 11) UI Setup
-local TradingTab    = Window:AddTab("Trading", "shopping-cart", "Automated resource trading")
-local SettingsGroup = TradingTab:AddLeftGroupbox("Auto-Trade Settings", "settings")
+local function hasTradeWith(countryFolder: Instance, resourceName: string, partnerName: string): boolean
+	local trade = getTradeFolder(countryFolder, resourceName)
+	return trade and (trade:FindFirstChild(partnerName) ~= nil) or false
+end
 
--- Resources dropdown
-local resourcesFolder = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Resources")
-local listNames = {}
-for _, r in ipairs(resourcesFolder:GetChildren()) do table.insert(listNames, r.Name) end
-table.sort(listNames)
+local function targetSlotsOccupied(targetCountry: Instance, resourceName: string): boolean
+	return getTradeCount(targetCountry, resourceName) > 0
+end
 
-SettingsGroup:AddDropdown("TradeResources", {
- Text    = "Select Resources",
- Values  = listNames,
- Default = {},
- Multi   = true,
- Tooltip = "Which resources to trade",
- Callback = function(map)
-  selectedResources = {}
-  for n, on in pairs(map) do if on then selectedResources[n] = true end end
-  local t = {}
-  for n in pairs(selectedResources) do table.insert(t, n) end
-  print("Selected:", #t > 0 and table.concat(t, ", ") or "none")
- end,
+local function getMyResourceObj(myCountry: Instance, resourceName: string): NumberValue?
+	local resFolder = myCountry:FindFirstChild("Resources")
+	if not resFolder then return nil end
+	local obj = resFolder:FindFirstChild(resourceName)
+	return (obj and obj:IsA("NumberValue")) and obj or nil
+end
+
+local function getMyStockpile(myCountry: Instance, resourceName: string): number
+	local obj = getMyResourceObj(myCountry, resourceName)
+	return obj and obj.Value or 0
+end
+
+local function getMyFlow(myCountry: Instance, resourceName: string): number?
+	local obj = getMyResourceObj(myCountry, resourceName)
+	if not obj then return nil end
+
+	local flow = obj:FindFirstChild("Flow")
+	if flow and flow:IsA("NumberValue") then
+		return flow.Value
+	end
+	return nil
+end
+
+local function computeSupplyCapUnits(myCountry: Instance, resourceName: string): number
+	local stock = getMyStockpile(myCountry, resourceName)
+	local flow  = getMyFlow(myCountry, resourceName)
+
+	local availableFromStock = stock - (CONFIG.ResourceReserveUnits or 0)
+	if availableFromStock < 0 then
+		availableFromStock = 0
+	end
+
+	local capByFlow = CONFIG.MaxUnitsAbsolute
+	if CONFIG.CapByFlow and flow then
+		capByFlow = math.max(0, math.floor(flow * (CONFIG.FlowSafetyMultiplier or 1)))
+	end
+
+	return math.min(availableFromStock, capByFlow, CONFIG.MaxUnitsAbsolute)
+end
+
+local function computeOptimizedUnits(balance: number, unitSellPrice: number, multiplier: number): number
+	local deficit     = math.abs(balance)
+	local targetMoney = deficit * (CONFIG.TargetPercent or 0.80)
+
+	local effectiveUnitPrice = unitSellPrice * multiplier
+	if effectiveUnitPrice <= 0 then
+		return 0
+	end
+
+	local units = math.floor(targetMoney / effectiveUnitPrice)
+	if units < (CONFIG.MinUnits or 1) then
+		units = CONFIG.MinUnits or 1
+	end
+	if units > (CONFIG.MaxUnitsAbsolute or 999) then
+		units = CONFIG.MaxUnitsAbsolute or 999
+	end
+
+	return units
+end
+
+local function sendResourceTrade(targetCountryName: string, resourceName: string, mode: string, units: number, multiplier: number): (boolean, string)
+	local ok = assertStillLeader()
+	if not ok then
+		return false, "Not leader"
+	end
+
+	local args = {
+		targetCountryName,
+		"ResourceTrade",
+		{
+			resourceName,
+			mode,
+			units,
+			multiplier,
+			"Trade"
+		}
+	}
+
+	ManageAlliance:FireServer(unpack(args))
+	return true, "Sent"
+end
+
+--============================================================
+-- Best-first runner
+--============================================================
+local function runOnceBestFirst(pushLogFn: ((string)->())?)
+	local ok, myCountry = assertStillLeader()
+	if not ok or not myCountry then
+		pushLogFn = pushLogFn or log
+		pushLogFn("STOP: Not leader of any country.")
+		return
+	end
+
+	if CONFIG.Multiplier < 1 then
+		(pushLogFn or log)("STOP: Multiplier must be >= 1.")
+		return
+	end
+
+	local unitSellPrice = getUnitSellPrice(CONFIG.ResourceName)
+	if not unitSellPrice then
+		(pushLogFn or log)("STOP: Missing price for " .. tostring(CONFIG.ResourceName))
+		return
+	end
+
+	local myPartners = getTradeCount(myCountry, CONFIG.ResourceName)
+	if myPartners >= (CONFIG.MaxPartnersPerResource or 999) then
+		return
+	end
+
+	local supplyCap = computeSupplyCapUnits(myCountry, CONFIG.ResourceName)
+	if supplyCap <= 0 then
+		return
+	end
+
+	local candidates = {}
+
+	for _, target in ipairs(CountryData:GetChildren()) do
+		local stillLeader = assertStillLeader()
+		if not stillLeader then
+			(pushLogFn or log)("STOP: Lost leadership mid-scan.")
+			return
+		end
+
+		if target ~= myCountry and isAICountry(target) then
+			local bal = getBalance(target)
+			if bal and bal < 0 then
+				if not hasTradeWith(myCountry, CONFIG.ResourceName, target.Name) then
+					if (not CONFIG.SkipIfTargetSlotOccupied) or (not targetSlotsOccupied(target, CONFIG.ResourceName)) then
+						table.insert(candidates, {
+							Target  = target,
+							Balance = bal,
+							Deficit = math.abs(bal),
+						})
+					end
+				end
+			end
+		end
+	end
+
+	table.sort(candidates, function(a, b)
+		return a.Deficit > b.Deficit
+	end)
+
+	local remainingCap = supplyCap
+	for _, item in ipairs(candidates) do
+		local stillLeader, refreshedMyCountry = assertStillLeader()
+		if not stillLeader or not refreshedMyCountry then
+			return
+		end
+		myCountry = refreshedMyCountry
+
+		myPartners = getTradeCount(myCountry, CONFIG.ResourceName)
+		if myPartners >= (CONFIG.MaxPartnersPerResource or 999) then
+			break
+		end
+		if remainingCap <= 0 then
+			break
+		end
+
+		local target = item.Target
+
+		if not hasTradeWith(myCountry, CONFIG.ResourceName, target.Name) then
+			if (not CONFIG.SkipIfTargetSlotOccupied) or (not targetSlotsOccupied(target, CONFIG.ResourceName)) then
+				local unitsOptimized = computeOptimizedUnits(item.Balance, unitSellPrice, CONFIG.Multiplier)
+				local unitsFinal     = math.min(unitsOptimized, remainingCap)
+
+				if unitsFinal >= (CONFIG.MinUnits or 1) then
+					local sent, reason = sendResourceTrade(target.Name, CONFIG.ResourceName, CONFIG.Mode, unitsFinal, CONFIG.Multiplier)
+					local msg = ("%s | bal: %s | units: %d | %s"):format(
+						target.Name,
+						tostring(item.Balance),
+						unitsFinal,
+						sent and "✅ sent" or ("❌ " .. reason)
+					)
+
+					if pushLogFn then pushLogFn(msg) else log(msg) end
+					remainingCap -= unitsFinal
+				end
+			end
+		end
+	end
+end
+
+--============================================================
+-- UI
+--============================================================
+local Window = Library:CreateWindow({
+	Title               = "Auto AI Trading",
+	Footer              = "RoN | Best-First AI Trader",
+	Icon                = 95816097006870,
+	NotifySide          = "Right",
+	EnableSidebarResize = true,
+	Resizable           = true,
+	UnlockMouseWhileOpen= true,
 })
 
--- Enable toggle
-SettingsGroup:AddToggle("EnableAutoTrade", {
- Text    = "Enable Auto-Trade",
- Default = false,
- Callback = function(v)
-  tradingEnabled = v
-  if v then startTrading() else stopTrading() end
- end,
+local Tabs = {
+	Main         = Window:AddTab("Main", "user"),
+	["UI Settings"]= Window:AddTab("UI Settings", "settings"),
+}
+
+-- Main groupboxes
+local Left   = Tabs.Main:AddLeftGroupbox("Trading", "wrench")
+local Right  = Tabs.Main:AddRightGroupbox("Status", "activity")
+
+local Toggles = Library.Toggles
+local Options = Library.Options
+
+-- Status labels
+local StatusLabel   = Right:AddLabel({ Text = "Status: Idle", DoesWrap = true })
+local CountryLabel  = Right:AddLabel({ Text = "Country: (detecting)", DoesWrap = true })
+local SupplyLabel   = Right:AddLabel({ Text = "Supply: ?", DoesWrap = true })
+local PartnerLabel  = Right:AddLabel({ Text = "Partners: ?", DoesWrap = true })
+
+-- Live watermark (optional)
+local Watermark = Library:AddDraggableLabel("AutoTrade | idle")
+
+-- Logging
+local function pushUILog(msg: string)
+	Library:Notify({ Title = "AutoTrade", Description = msg, Time = 2 })
+	log(msg)
+end
+
+-- Controls
+Left:AddToggle("AT_Enabled", {
+	Text    = "Enable Auto Trading",
+	Default = CONFIG.Enabled,
+}):OnChanged(function()
+	CONFIG.Enabled = Toggles.AT_Enabled.Value
+	StatusLabel:SetText("Status: " .. (CONFIG.Enabled and "Running" or "Idle"))
+	Watermark:SetText("AutoTrade | " .. (CONFIG.Enabled and "running" or "idle"))
+end)
+
+Left:AddDropdown("AT_Resource", {
+	Text     = "Resource",
+	Values   = (function()
+		local list = {}
+		for _, child in ipairs(Resources:GetChildren()) do
+			if child:IsA("NumberValue") then
+				table.insert(list, child.Name)
+			end
+		end
+		table.sort(list)
+		return list
+	end)(),
+	Default  = CONFIG.ResourceName,
+	Searchable = true,
+}):OnChanged(function()
+	CONFIG.ResourceName = Options.AT_Resource.Value
+end)
+
+Left:AddSlider("AT_TargetPercent", {
+	Text     = "Target % of deficit",
+	Default  = math.floor(CONFIG.TargetPercent * 100),
+	Min      = 50,
+	Max      = 95,
+	Rounding = 0,
+	Suffix   = "%",
+}):OnChanged(function(v)
+	CONFIG.TargetPercent = v / 100
+end)
+
+Left:AddSlider("AT_Multiplier", {
+	Text     = "Multiplier",
+	Default  = CONFIG.Multiplier,
+	Min      = 1,
+	Max      = 3,
+	Rounding = 0,
+}):OnChanged(function(v)
+	CONFIG.Multiplier = v
+end)
+
+Left:AddSlider("AT_Delay", {
+	Text     = "Loop Delay",
+	Default  = CONFIG.DelaySeconds,
+	Min      = 1,
+	Max      = 10,
+	Rounding = 1,
+	Suffix   = "s",
+}):OnChanged(function(v)
+	CONFIG.DelaySeconds = v
+end)
+
+Left:AddDivider("Safety")
+
+Left:AddSlider("AT_Reserve", {
+	Text     = "Stockpile reserve (units)",
+	Default  = CONFIG.ResourceReserveUnits,
+	Min      = 0,
+	Max      = 500,
+	Rounding = 0,
+}):OnChanged(function(v)
+	CONFIG.ResourceReserveUnits = v
+end)
+
+Left:AddToggle("AT_CapByFlow", {
+	Text    = "Cap by Flow",
+	Default = CONFIG.CapByFlow,
+}):OnChanged(function()
+	CONFIG.CapByFlow = Toggles.AT_CapByFlow.Value
+end)
+
+Left:AddSlider("AT_FlowSafety", {
+	Text     = "Flow Safety %",
+	Default  = math.floor(CONFIG.FlowSafetyMultiplier * 100),
+	Min      = 50,
+	Max      = 100,
+	Rounding = 0,
+	Suffix   = "%",
+}):OnChanged(function(v)
+	CONFIG.FlowSafetyMultiplier = v / 100
+end)
+
+Left:AddDivider("Slots")
+
+Left:AddToggle("AT_SkipSlot", {
+	Text    = "Skip if target slot occupied",
+	Default = CONFIG.SkipIfTargetSlotOccupied,
+}):OnChanged(function()
+	CONFIG.SkipIfTargetSlotOccupied = Toggles.AT_SkipSlot.Value
+end)
+
+Left:AddSlider("AT_MaxPartners", {
+	Text     = "Max partners for resource",
+	Default  = CONFIG.MaxPartnersPerResource,
+	Min      = 1,
+	Max      = 30,
+	Rounding = 0,
+}):OnChanged(function(v)
+	CONFIG.MaxPartnersPerResource = v
+end)
+
+Left:AddDivider("Actions")
+
+Left:AddButton({
+	Text = "Run Once (Best First)",
+	Func = function()
+		pushUILog("Run once...")
+		runOnceBestFirst(pushUILog)
+	end
 })
 
-print("Advanced Trading ready; toggle on to begin.")
+Left:AddButton({
+	Text = "Stop (Disable)",
+	Func = function()
+		Toggles.AT_Enabled:SetValue(false)
+	end
+})
+
+--============================================================
+-- Theme + Save
+--============================================================
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+
+ThemeManager:SetFolder("RoN_AutoTrade")
+SaveManager:SetFolder("RoN_AutoTrade")
+
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({}) -- add any you want ignored
+
+ThemeManager:ApplyToTab(Tabs["UI Settings"])
+SaveManager:BuildConfigSection(Tabs["UI Settings"])
+ThemeManager:LoadDefault()
+SaveManager:LoadAutoloadConfig()
+
+--============================================================
+-- Status updater + loop
+--============================================================
+task.spawn(function()
+	while true do
+		local ok, myCountry = assertStillLeader()
+		if ok and myCountry then
+			CountryLabel:SetText("Country: " .. myCountry.Name)
+
+			local stock = getMyStockpile(myCountry, CONFIG.ResourceName)
+			local flow  = getMyFlow(myCountry, CONFIG.ResourceName)
+			local partners = getTradeCount(myCountry, CONFIG.ResourceName)
+
+			SupplyLabel:SetText(("Supply: %s | Flow: %s"):format(tostring(stock), tostring(flow)))
+			PartnerLabel:SetText(("Partners (%s): %d/%d"):format(CONFIG.ResourceName, partners, CONFIG.MaxPartnersPerResource))
+		else
+			CountryLabel:SetText("Country: (not leader)")
+			SupplyLabel:SetText("Supply: ?")
+			PartnerLabel:SetText("Partners: ?")
+		end
+
+		if CONFIG.Enabled then
+			runOnceBestFirst(pushUILog)
+		end
+
+		task.wait(CONFIG.DelaySeconds)
+	end
+end)
+
+Library:Notify({ Title = "AutoTrade", Description = "Loaded. Configure and enable Auto Trading.", Time = 5 })
