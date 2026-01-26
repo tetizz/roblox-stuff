@@ -1,16 +1,15 @@
--- Rise of Nations - Auto AI Trading (Owner Version)
--- Units sold = floor(AI net income * TradePercent / unit sell price)
--- AI net income = Revenue.Total - Expenses.Total (attributes)
--- Rule: if their net is negative (deficit), DO NOT send a trade
--- Rule: target must have at least 1 city in workspace.Baseplate.Cities.<CountryName>
--- Rule: non-consumer goods resources are capped at 5 units per trade
--- Only safety: do not sell if our resource Flow is negative
--- No flow cap
--- Multiplier fixed at 1
--- Acceptance check: myCountry.Resources[Resource].Trade[TargetName] exists after attempt
--- Adds cooldown so it doesn't retry rejected targets
--- UI: TradePercent slider (0% -> 80%), Attempting shows units+resource+country, Valid list, Live TradeExport, Unload
--- Loop Delay slider: 0.0 -> 10.0 in 0.1 increments
+-- Auto AI Trading (Authorized / Owner Setup)
+-- Requires a server RemoteEvent: ReplicatedStorage.AutoTradeRequest
+-- Server should validate:
+-- - sender is leader
+-- - target is AI
+-- - target has >= 1 city in workspace.Baseplate.Cities[targetName]
+-- - target net income = Revenue.Total - Expenses.Total > 0
+-- - our flow >= 0
+-- - units allow fractions (rounded)
+-- - non-consumer goods cap <= 5
+-- Then it should apply the trade and create/maintain:
+-- workspace.CountryData[myCountry].Resources[resource].Trade[targetName]
 
 local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
@@ -24,35 +23,23 @@ local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local CountryData = workspace:WaitForChild("CountryData")
-local GameManager = workspace:WaitForChild("GameManager")
-local ManageAlliance = GameManager:WaitForChild("ManageAlliance")
+
+local Baseplate = workspace:WaitForChild("Baseplate")
+local CitiesRoot = Baseplate:WaitForChild("Cities")
 
 local Assets = ReplicatedStorage:WaitForChild("Assets")
 local Resources = Assets:WaitForChild("Resources")
 
--- City ownership folder (must exist + have >= 1 child)
-local Baseplate = workspace:WaitForChild("Baseplate")
-local CitiesRoot = Baseplate:WaitForChild("Cities")
+local TradeRemote = ReplicatedStorage:WaitForChild("AutoTradeRequest") -- you own this in your place
 
 local CONFIG = {
 	Enabled = false,
 	ResourceName = "Consumer Goods",
-	Mode = "Sell",
-
-	TargetPercent = 0.79, -- slider controls 0% -> 80%
-	Multiplier = 1,
-
-	DelaySeconds = 2,
+	TargetPercent = 0.79, -- 0 -> 0.8
+	DelaySeconds = 2.0, -- 0.0 -> 10.0
 	MaxPartnersPerResource = 100,
-
-	MinUnits = 1,
-	MaxUnitsAbsolute = 999,
-
-	SkipIfTargetSlotOccupied = true,
-
 	AttemptCheckDelay = 1.5,
 	CooldownSeconds = 120,
-
 	Debug = true
 }
 
@@ -81,11 +68,11 @@ local function getMyCountryFolder()
 end
 
 local function assertStillLeader()
-	local country = getMyCountryFolder()
-	if not country then
+	local c = getMyCountryFolder()
+	if not c then
 		return false
 	end
-	return true, country
+	return true, c
 end
 
 local function isAICountry(country)
@@ -94,9 +81,9 @@ local function isAICountry(country)
 end
 
 local function getTradeFolder(country, resource)
-	local resourcesFolder = country:FindFirstChild("Resources")
-	if not resourcesFolder then return end
-	local res = resourcesFolder:FindFirstChild(resource)
+	local rf = country:FindFirstChild("Resources")
+	if not rf then return end
+	local res = rf:FindFirstChild(resource)
 	if not res then return end
 	return res:FindFirstChild("Trade")
 end
@@ -111,21 +98,16 @@ local function hasTradeWith(country, resource, partner)
 	return trade and trade:FindFirstChild(partner) ~= nil
 end
 
-local function targetSlotsOccupied(country, resource)
-	return getTradeCount(country, resource) > 0
-end
-
-local function shouldSkipTargetSlot(country, resource)
-	if resource == "Consumer Goods" then
-		return false
-	end
-	return CONFIG.SkipIfTargetSlotOccupied and targetSlotsOccupied(country, resource)
+local function tradeExists(myCountry, resource, targetName)
+	local trade = getTradeFolder(myCountry, resource)
+	if not trade then return false end
+	return trade:FindFirstChild(targetName) ~= nil
 end
 
 local function getMyFlow(country, resource)
-	local resourcesFolder = country:FindFirstChild("Resources")
-	if not resourcesFolder then return end
-	local res = resourcesFolder:FindFirstChild(resource)
+	local rf = country:FindFirstChild("Resources")
+	if not rf then return end
+	local res = rf:FindFirstChild(resource)
 	if not res then return end
 	local flow = res:FindFirstChild("Flow")
 	return flow and flow.Value
@@ -137,12 +119,6 @@ local function isFlowNonNegative(country, resource)
 		return true
 	end
 	return flow >= 0
-end
-
-local function getUnitSellPrice(resource)
-	local v = Resources:FindFirstChild(resource)
-	if not v then return end
-	return v.Value * 0.8
 end
 
 local function getRevenueTotal(country)
@@ -170,75 +146,54 @@ local function getNetIncome(country)
 	return rev - exp
 end
 
--- Non-consumer goods capped at 5 units
+local function getUnitSellPrice(resource)
+	local v = Resources:FindFirstChild(resource)
+	if not v then return end
+	return v.Value * 0.8
+end
+
+local function getTradeIncome(country)
+	local econ = country:FindFirstChild("Economy")
+	if not econ then return end
+	local revenue = econ:FindFirstChild("Revenue")
+	if not revenue then return end
+	local tradeExport = revenue:FindFirstChild("TradeExport")
+	if not tradeExport then return end
+	return tradeExport.Value
+end
+
+-- Fractional units: rounded to 2 decimals
+-- Non-consumer goods cap at 5
 local function computeUnitsFromNet(netIncome, unitSellPrice)
 	if type(netIncome) ~= "number" or netIncome <= 0 then
 		return 0
 	end
 
 	local targetMoney = netIncome * CONFIG.TargetPercent
-	local units = math.floor(targetMoney / (unitSellPrice * CONFIG.Multiplier))
+	local units = targetMoney / unitSellPrice
 
-	if units < CONFIG.MinUnits then
-		units = CONFIG.MinUnits
+	units = math.floor(units * 100) / 100 -- 2 decimals
+
+	if CONFIG.ResourceName ~= "Consumer Goods" and units > 5 then
+		units = 5
 	end
 
-	if CONFIG.ResourceName ~= "Consumer Goods" then
-		if units > 5 then
-			units = 5
-		end
-	else
-		if units > CONFIG.MaxUnitsAbsolute then
-			units = CONFIG.MaxUnitsAbsolute
-		end
+	-- If it would be too tiny, skip (server can also clamp)
+	if units <= 0 then
+		return 0
 	end
 
 	return units
 end
 
-local function sendTrade(target, resource, units)
-	local ok = assertStillLeader()
-	if not ok then return end
-
-	local args = {
-		target,
-		"ResourceTrade",
-		{
-			resource,
-			"Sell",
-			units,
-			1,
-			"Trade"
-		}
-	}
-
-	ManageAlliance:FireServer(unpack(args))
+local function sendTrade(targetName, resource, units)
+	-- server enforces multiplier = 1
+	TradeRemote:FireServer(targetName, resource, units, 1)
 end
 
-local function getTradeIncome(country)
-	local econ = country:FindFirstChild("Economy")
-	if not econ then return end
-
-	local revenue = econ:FindFirstChild("Revenue")
-	if not revenue then return end
-
-	local tradeExport = revenue:FindFirstChild("TradeExport")
-	if not tradeExport then return end
-
-	return tradeExport.Value
-end
-
-local function tradeExists(myCountry, resource, targetName)
-	local trade = getTradeFolder(myCountry, resource)
-	if not trade then return false end
-	return trade:FindFirstChild(targetName) ~= nil
-end
-
---============================================================
--- Cooldowns / Pending attempts
---============================================================
+-- Cooldowns
 local Cooldowns = {}
-local PendingAttempts = {}
+local Pending = {}
 
 local function now()
 	return os.clock()
@@ -262,7 +217,7 @@ end
 --============================================================
 local Window = Library:CreateWindow({
 	Title = "Auto AI Trading",
-	Footer = "RoN Auto Trader",
+	Footer = "Authorized Build",
 	NotifySide = "Right",
 	Resizable = true,
 	EnableSidebarResize = true
@@ -288,14 +243,12 @@ local FlowLabel = Right:AddLabel("Flow: ?")
 local TradeIncomeLabel = Right:AddLabel("Trade Income: ?")
 local PercentLabel = Right:AddLabel("Trade Percent: ?")
 
-local AttemptingLabel = Right:AddLabel("Attempting to trade: (none)")
+local AttemptingLabel = Right:AddLabel("Attempting: (none)")
 local ValidLabel = Right:AddLabel("Valid countries: 0")
 local ValidListLabel = Right:AddLabel("Valid list: (none)")
 
 local function setAttempting(resource, units, name)
-	AttemptingLabel:SetText(
-		"Attempting to trade " .. tostring(units) .. " " .. tostring(resource) .. " to " .. tostring(name)
-	)
+	AttemptingLabel:SetText("Attempting to trade " .. tostring(units) .. " " .. tostring(resource) .. " to " .. tostring(name))
 end
 
 local function setValidList(names)
@@ -356,13 +309,12 @@ Left:AddSlider("TargetPercent", {
 	CONFIG.TargetPercent = v / 100
 end)
 
--- 0.0 -> 10.0 in 0.1 steps
 Left:AddSlider("Delay", {
 	Text = "Loop Delay",
-	Default = 2,
+	Default = 2.0,
 	Min = 0,
 	Max = 10,
-	Rounding = 1,
+	Rounding = 1, -- 0.1 steps
 	Suffix = "s"
 }):OnChanged(function(v)
 	CONFIG.DelaySeconds = v
@@ -389,11 +341,6 @@ Left:AddSlider("Cooldown", {
 	CONFIG.CooldownSeconds = v
 end)
 
-Left:AddButton("Run Once", function()
-	CONFIG.Enabled = true
-	Toggles.Enabled:SetValue(true)
-end)
-
 Left:AddButton("Unload UI", function()
 	if Window and Window.Destroy then
 		Window:Destroy()
@@ -406,15 +353,11 @@ Left:AddButton("Unload UI", function()
 	end
 end)
 
---============================================================
 -- Theme + Save
---============================================================
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
-
-ThemeManager:SetFolder("RoN_AutoTrade")
-SaveManager:SetFolder("RoN_AutoTrade")
-
+ThemeManager:SetFolder("AutoTrade")
+SaveManager:SetFolder("AutoTrade")
 SaveManager:IgnoreThemeSettings()
 ThemeManager:ApplyToTab(Tabs["UI Settings"])
 SaveManager:BuildConfigSection(Tabs["UI Settings"])
@@ -422,7 +365,7 @@ ThemeManager:LoadDefault()
 SaveManager:LoadAutoloadConfig()
 
 --============================================================
--- Core: One attempt per loop
+-- Candidate picker + loop
 --============================================================
 local function getValidCandidates(myCountry, resource, unitSellPrice)
 	local valid = {}
@@ -430,22 +373,13 @@ local function getValidCandidates(myCountry, resource, unitSellPrice)
 	for _, target in ipairs(CountryData:GetChildren()) do
 		if target ~= myCountry and isAICountry(target) and countryHasAtLeastOneCity(target.Name) then
 			if not hasTradeWith(myCountry, resource, target.Name) then
-				if not shouldSkipTargetSlot(target, resource) then
-					if not isOnCooldown(target.Name) then
-						if not PendingAttempts[target.Name] then
-							local net = getNetIncome(target)
+				if not isOnCooldown(target.Name) and not Pending[target.Name] then
+					local net = getNetIncome(target)
 
-							-- if their net is negative, don't trade
-							if net and net > 0 then
-								local units = computeUnitsFromNet(net, unitSellPrice)
-								if units >= CONFIG.MinUnits then
-									valid[#valid + 1] = {
-										name = target.Name,
-										net = net,
-										units = units
-									}
-								end
-							end
+					if net and net > 0 then
+						local units = computeUnitsFromNet(net, unitSellPrice)
+						if units > 0 then
+							valid[#valid + 1] = { name = target.Name, net = net, units = units }
 						end
 					end
 				end
@@ -463,27 +397,26 @@ end
 local function attemptOneTrade()
 	local ok, myCountry = assertStillLeader()
 	if not ok then
-		AttemptingLabel:SetText("Attempting to trade: (not leader)")
+		AttemptingLabel:SetText("Attempting: (not leader)")
 		setValidList({})
 		return
 	end
 
 	if not isFlowNonNegative(myCountry, CONFIG.ResourceName) then
-		log("Stopped: flow is negative for " .. CONFIG.ResourceName)
-		AttemptingLabel:SetText("Attempting to trade: (flow negative)")
+		AttemptingLabel:SetText("Attempting: (flow negative)")
 		setValidList({})
 		return
 	end
 
 	if getTradeCount(myCountry, CONFIG.ResourceName) >= CONFIG.MaxPartnersPerResource then
-		AttemptingLabel:SetText("Attempting to trade: (max partners reached)")
+		AttemptingLabel:SetText("Attempting: (max partners reached)")
 		setValidList({})
 		return
 	end
 
 	local price = getUnitSellPrice(CONFIG.ResourceName)
 	if not price then
-		AttemptingLabel:SetText("Attempting to trade: (no price)")
+		AttemptingLabel:SetText("Attempting: (no price)")
 		setValidList({})
 		return
 	end
@@ -498,25 +431,20 @@ local function attemptOneTrade()
 
 	local pick = candidates[1]
 	if not pick then
-		AttemptingLabel:SetText("Attempting to trade: (none)")
+		AttemptingLabel:SetText("Attempting: (none)")
 		return
 	end
 
 	setAttempting(CONFIG.ResourceName, pick.units, pick.name)
 
-	PendingAttempts[pick.name] = {
-		resource = CONFIG.ResourceName,
-		when = now(),
-		units = pick.units
-	}
-
+	Pending[pick.name] = true
 	sendTrade(pick.name, CONFIG.ResourceName, pick.units)
 	log("Attempted", pick.units, CONFIG.ResourceName, "to", pick.name, "(net:", pick.net .. ")")
 
 	task.delay(CONFIG.AttemptCheckDelay, function()
 		local ok2, myCountry2 = assertStillLeader()
 		if not ok2 then
-			PendingAttempts[pick.name] = nil
+			Pending[pick.name] = nil
 			return
 		end
 
@@ -526,24 +454,19 @@ local function attemptOneTrade()
 			log("Accepted:", pick.name)
 		else
 			setCooldown(pick.name)
-			log("Rejected/Failed:", pick.name, "-> cooldown", CONFIG.CooldownSeconds .. "s")
+			log("Rejected/Failed:", pick.name)
 		end
 
-		PendingAttempts[pick.name] = nil
+		Pending[pick.name] = nil
 	end)
 end
 
---============================================================
--- Loop (UI + trading)
---============================================================
 task.spawn(function()
 	while true do
 		local ok, myCountry = assertStillLeader()
 		if ok then
 			CountryLabel:SetText("Country: " .. myCountry.Name)
-
-			local partners = getTradeCount(myCountry, CONFIG.ResourceName)
-			PartnerLabel:SetText("Partners: " .. tostring(partners))
+			PartnerLabel:SetText("Partners: " .. tostring(getTradeCount(myCountry, CONFIG.ResourceName)))
 
 			local flow = getMyFlow(myCountry, CONFIG.ResourceName)
 			FlowLabel:SetText("Flow: " .. tostring(flow))
@@ -558,7 +481,7 @@ task.spawn(function()
 			FlowLabel:SetText("Flow: ?")
 			TradeIncomeLabel:SetText("Trade Income: ?")
 			PercentLabel:SetText("Trade Percent: ?")
-			AttemptingLabel:SetText("Attempting to trade: (none)")
+			AttemptingLabel:SetText("Attempting: (none)")
 			ValidLabel:SetText("Valid countries: 0")
 			ValidListLabel:SetText("Valid list: (none)")
 		end
@@ -572,3 +495,4 @@ task.spawn(function()
 end)
 
 Library:Notify("Auto AI Trader loaded! (RightShift toggles UI)", 4)
+
