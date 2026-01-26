@@ -1,13 +1,12 @@
 -- Rise of Nations - Auto AI Trading (Owner Version)
--- Units sold = floor(abs(AI net income) * 80% / unit sell price)
+-- Units sold = floor(abs(AI net income) * TradePercent / unit sell price)
 -- AI net income = Revenue.Total - Expenses.Total (attributes)
 -- Only safety: do not sell if our resource Flow is negative
 -- No flow cap
 -- Multiplier fixed at 1
--- Max partners default = 100
 -- Acceptance check: myCountry.Resources[Resource].Trade[TargetName] exists after attempt
 -- Adds cooldown so it doesn't retry rejected targets
--- UI: Attempting + Valid countries list + Live TradeExport + Unload
+-- UI: TradePercent slider (0% -> 80%), Attempting + Valid list + Live TradeExport + Unload
 
 local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
@@ -32,7 +31,7 @@ local CONFIG = {
 	ResourceName = "Consumer Goods",
 	Mode = "Sell",
 
-	TargetPercent = 0.79,
+	TargetPercent = 0.79, -- slider controls 0% -> 80%
 	Multiplier = 1,
 
 	DelaySeconds = 2,
@@ -213,7 +212,7 @@ local function tradeExists(myCountry, resource, targetName)
 end
 
 --============================================================
--- Cooldowns / Attempt memory
+-- Cooldowns / Pending attempts
 --============================================================
 local Cooldowns = {}
 local PendingAttempts = {}
@@ -264,6 +263,7 @@ local CountryLabel = Right:AddLabel("Country: ?")
 local PartnerLabel = Right:AddLabel("Partners: ?")
 local FlowLabel = Right:AddLabel("Flow: ?")
 local TradeIncomeLabel = Right:AddLabel("Trade Income: ?")
+local PercentLabel = Right:AddLabel("Trade Percent: ?")
 
 local AttemptingLabel = Right:AddLabel("Attempting to trade with: (none)")
 local ValidLabel = Right:AddLabel("Valid countries: 0")
@@ -320,6 +320,17 @@ Left:AddDropdown("Resource", {
 	CONFIG.ResourceName = Options.Resource.Value
 end)
 
+Left:AddSlider("TargetPercent", {
+	Text = "Trade Percent",
+	Default = math.floor(CONFIG.TargetPercent * 100 + 0.5),
+	Min = 0,
+	Max = 80,
+	Rounding = 0,
+	Suffix = "%"
+}):OnChanged(function(v)
+	CONFIG.TargetPercent = v / 100
+end)
+
 Left:AddSlider("Delay", {
 	Text = "Loop Delay",
 	Default = 2,
@@ -353,7 +364,6 @@ Left:AddSlider("Cooldown", {
 end)
 
 Left:AddButton("Run Once", function()
-	-- handled by loop; keeping button for manual kick
 	CONFIG.Enabled = true
 	Toggles.Enabled:SetValue(true)
 end)
@@ -386,7 +396,7 @@ ThemeManager:LoadDefault()
 SaveManager:LoadAutoloadConfig()
 
 --============================================================
--- Core: One attempt per tick (prevents spam + enables reject detection)
+-- Core: One attempt per loop (prevents spam + enables reject detection)
 --============================================================
 local function getValidCandidates(myCountry, resource, unitSellPrice)
 	local valid = {}
@@ -512,11 +522,14 @@ task.spawn(function()
 
 			local tradeIncome = getTradeIncome(myCountry)
 			TradeIncomeLabel:SetText("Trade Income: " .. tostring(tradeIncome))
+
+			PercentLabel:SetText("Trade Percent: " .. tostring(math.floor(CONFIG.TargetPercent * 100 + 0.5)) .. "%")
 		else
 			CountryLabel:SetText("Country: (not leader)")
 			PartnerLabel:SetText("Partners: ?")
 			FlowLabel:SetText("Flow: ?")
 			TradeIncomeLabel:SetText("Trade Income: ?")
+			PercentLabel:SetText("Trade Percent: ?")
 			AttemptingLabel:SetText("Attempting to trade with: (none)")
 			ValidLabel:SetText("Valid countries: 0")
 			ValidListLabel:SetText("Valid list: (none)")
@@ -531,4 +544,3 @@ task.spawn(function()
 end)
 
 Library:Notify("Auto AI Trader loaded! (RightShift toggles UI)", 4)
-
