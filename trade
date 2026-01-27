@@ -1,16 +1,27 @@
--- Rise of Nations - Auto AI Trading (Owner Version)
--- Units sold = (AI net income * TradePercent / unit sell price)  [fractional allowed]
--- AI net income = Revenue.Total.Value - Expenses.Total.Value
--- Rule: if their net is negative/zero (deficit), DO NOT send a trade
--- Rule: target must have at least 1 city in workspace.Baseplate.Cities.<CountryName>
--- Rule: non-consumer goods resources are capped at 5 units per trade
--- Only safety: do not sell if our resource Flow is negative
--- No flow cap
--- Multiplier fixed at 1
--- Acceptance check: myCountry.Resources[Resource].Trade[TargetName] exists after attempt
--- Adds cooldown so it doesn't retry rejected targets
--- UI: TradePercent slider (0% -> 80%), Attempting shows units+resource+country, Valid list, Live TradeExport, Unload
--- Loop Delay slider: 0.0 -> 10.0 in 0.1 increments
+-- Rise of Nations - Auto AI Trading + Auto Build (Owner Version)
+-- Auto Trade rules:
+-- - Units sold = (AI net income * TradePercent / unit sell price) [fractional allowed]
+-- - AI net income = Revenue.Total.Value - Expenses.Total.Value (fallback to attributes)
+-- - Rule: if target net <= 0, DO NOT send a trade
+-- - Rule: target must have at least 1 city in workspace.Baseplate.Cities.<CountryName>
+-- - Rule: non-consumer goods capped at 5 units per trade
+-- - Only safety: do not sell if our resource Flow is negative (no other caps)
+-- - Multiplier fixed at 1
+-- - Acceptance check: myCountry.Resources[Resource].Trade[target] exists after attempt
+-- - Cooldown per (country + resource) to avoid spamming rejects
+-- - Loop delay slider: 0.0 -> 10.0 in 0.1 increments, default 0.8
+
+-- Auto Build rules:
+-- - Tab: Auto Build
+-- - Select multiple buildings in order (multi-select)
+-- - Remove "Expand Canal" from building list
+-- - Build across every city in your nation (children of workspace.Baseplate.Cities[MyCountryName])
+-- - If city Tier >= 10: stop trying to develop/build for that city (skip)
+-- - Infrastructure cap only blocks building named "Infrastructure" (infra max 10)
+-- - Skip if city already has that building
+-- - Cost must be <= our funds/stockpile (best-effort funds detection)
+-- - Show Queue.UnitOrder.Unit value for the currently attempted city
+-- - Auto Build interval slider: 0 -> 120 seconds, default 60
 
 local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
@@ -26,37 +37,34 @@ local LocalPlayer = Players.LocalPlayer
 local CountryData = workspace:WaitForChild("CountryData")
 local GameManager = workspace:WaitForChild("GameManager")
 local ManageAlliance = GameManager:WaitForChild("ManageAlliance")
+local CreateBuilding = GameManager:WaitForChild("CreateBuilding")
 
 local Assets = ReplicatedStorage:WaitForChild("Assets")
 local Resources = Assets:WaitForChild("Resources")
+local BuildingsFolder = Assets:WaitForChild("Buildings")
 
--- City ownership folder (must exist + have >= 1 child)
 local Baseplate = workspace:WaitForChild("Baseplate")
 local CitiesRoot = Baseplate:WaitForChild("Cities")
 
 local CONFIG = {
-	Enabled = false,
+	-- Auto Trade
+	TradeEnabled = false,
 	ResourceName = "Consumer Goods",
-	Mode = "Sell",
-
-	-- 79% default, slider controls 0% -> 80%
-	TargetPercent = 0.79,
-
-	-- fixed forever
+	TargetPercent = 0.79, -- slider 0% -> 80%, default 79%
 	Multiplier = 1,
-
-	-- loop delay slider 0.0 -> 10.0
-	DelaySeconds = 2.0,
-
-	-- fractional units allowed; this is only a minimum threshold to avoid spam with tiny floats
-	MinUnits = 0.1,
-
+	DelaySeconds = 0.8, -- default 0.8
+	MinUnits = 0.1, -- allow fractional
 	SkipIfTargetSlotOccupied = true,
-
 	AttemptCheckDelay = 1.5,
 	CooldownSeconds = 120,
+	Debug = true,
 
-	Debug = true
+	-- Auto Build
+	AutoBuildEnabled = false,
+	AutoBuildSelected = {}, -- ordered list from multi-select
+	AutoBuildIntervalSeconds = 60, -- slider 0 -> 120 default 60
+	AutoBuildDebug = true,
+	AutoBuildCityIndex = 1
 }
 
 local function log(...)
@@ -65,14 +73,19 @@ local function log(...)
 	end
 end
 
-local function countryHasAtLeastOneCity(countryName)
-	local folder = CitiesRoot:FindFirstChild(countryName)
-	if not folder then
-		return false
+local function logBuild(...)
+	if CONFIG.AutoBuildDebug then
+		print("[AutoBuild]", ...)
 	end
-	return #folder:GetChildren() >= 1
 end
 
+local function now()
+	return os.clock()
+end
+
+--============================================================
+-- Common helpers
+--============================================================
 local function getMyCountryFolder()
 	local myName = LocalPlayer.Name
 	for _, country in ipairs(CountryData:GetChildren()) do
@@ -96,13 +109,22 @@ local function isAICountry(country)
 	return leader and string.find(leader.Value, "AI") ~= nil
 end
 
+local function countryHasAtLeastOneCity(countryName)
+	local folder = CitiesRoot:FindFirstChild(countryName)
+	if not folder then
+		return false
+	end
+	return #folder:GetChildren() >= 1
+end
+
+--============================================================
+-- Auto Trade helpers
+--============================================================
 local function getTradeFolder(country, resource)
 	local resourcesFolder = country:FindFirstChild("Resources")
 	if not resourcesFolder then return end
-
 	local res = resourcesFolder:FindFirstChild(resource)
 	if not res then return end
-
 	return res:FindFirstChild("Trade")
 end
 
@@ -138,7 +160,6 @@ local function getMyFlow(country, resource)
 	return flow and flow.Value
 end
 
--- Only safety rule: do not sell if our Flow is negative (no other cap)
 local function isFlowNonNegative(country, resource)
 	local flow = getMyFlow(country, resource)
 	if type(flow) ~= "number" then
@@ -192,8 +213,6 @@ local function getNetIncome(country)
 	return rev - exp
 end
 
--- Non-consumer goods capped at 5 units per trade
--- Fractional units allowed (no floor)
 local function computeUnitsFromNet(netIncome, unitSellPrice)
 	if type(netIncome) ~= "number" or netIncome <= 0 then
 		return 0
@@ -206,10 +225,8 @@ local function computeUnitsFromNet(netIncome, unitSellPrice)
 		return 0
 	end
 
-	if CONFIG.ResourceName ~= "Consumer Goods" then
-		if units > 5 then
-			units = 5
-		end
+	if CONFIG.ResourceName ~= "Consumer Goods" and units > 5 then
+		units = 5
 	end
 
 	return units
@@ -234,8 +251,6 @@ local function sendTrade(target, resource, units)
 	ManageAlliance:FireServer(unpack(args))
 end
 
--- Live trade income label using:
--- workspace.CountryData["North American Union"].Economy.Revenue.TradeExport.Value
 local function getTradeIncome(country)
 	local econ = country:FindFirstChild("Economy")
 	if not econ then return end
@@ -255,15 +270,8 @@ local function tradeExists(myCountry, resource, targetName)
 	return trade:FindFirstChild(targetName) ~= nil
 end
 
---============================================================
--- Cooldowns / Pending attempts
---============================================================
 local Cooldowns = {}
 local PendingAttempts = {}
-
-local function now()
-	return os.clock()
-end
 
 local function cooldownKey(targetName, resourceName)
 	return tostring(targetName) .. "|" .. tostring(resourceName)
@@ -286,11 +294,118 @@ local function clearCooldown(targetName, resourceName)
 end
 
 --============================================================
+-- Auto Build helpers
+--============================================================
+local function cityTier(city)
+	return city and city:GetAttribute("Tier")
+end
+
+local function cityInfrastructure(city)
+	return city and city:GetAttribute("Infrastructure")
+end
+
+local function cityHasBuilding(city, buildingName)
+	if not city then return false end
+	local buildings = city:FindFirstChild("Buildings")
+	if not buildings then return false end
+	return buildings:FindFirstChild(buildingName) ~= nil
+end
+
+local function getQueueUnitValue(city)
+	if not city then return end
+	local queue = city:FindFirstChild("Queue")
+	if not queue then return end
+	local unitOrder = queue:FindFirstChild("UnitOrder")
+	if not unitOrder then return end
+	local unit = unitOrder:FindFirstChild("Unit")
+	if not unit then return end
+	return unit.Value
+end
+
+local function getBuildingCost(buildingName)
+	local b = BuildingsFolder:FindFirstChild(buildingName)
+	if not b then return end
+	local cost = b:FindFirstChild("Cost")
+	return cost and cost.Value
+end
+
+local function getMyFunds()
+	local ok, myCountry = assertStillLeader()
+	if not ok then return end
+
+	local econ = myCountry:FindFirstChild("Economy")
+	if econ then
+		local balance = econ:FindFirstChild("Balance")
+		if balance and type(balance.Value) == "number" then
+			return balance.Value
+		end
+
+		local stockpile = econ:FindFirstChild("Stockpile")
+		if stockpile and type(stockpile.Value) == "number" then
+			return stockpile.Value
+		end
+
+		local money = econ:FindFirstChild("Money")
+		if money and type(money.Value) == "number" then
+			return money.Value
+		end
+
+		local balAttr = econ:GetAttribute("Balance")
+		if type(balAttr) == "number" then
+			return balAttr
+		end
+
+		local stockAttr = econ:GetAttribute("Stockpile")
+		if type(stockAttr) == "number" then
+			return stockAttr
+		end
+	end
+end
+
+local function canAffordBuilding(buildingName)
+	local cost = getBuildingCost(buildingName)
+	local funds = getMyFunds()
+	if type(cost) ~= "number" or type(funds) ~= "number" then
+		return false
+	end
+	return cost <= funds
+end
+
+local function fireCreateBuilding(city, buildingName)
+	local args = {
+		{ city },
+		buildingName
+	}
+	CreateBuilding:FireServer(unpack(args))
+end
+
+local function getAllMyCitiesSorted()
+	local ok, myCountry = assertStillLeader()
+	if not ok then return {} end
+
+	local folder = CitiesRoot:FindFirstChild(myCountry.Name)
+	if not folder then return {} end
+
+	local list = {}
+	for _, c in ipairs(folder:GetChildren()) do
+		if c:IsA("Folder") then
+			list[#list + 1] = c
+		end
+	end
+
+	table.sort(list, function(a, b)
+		return a.Name < b.Name
+	end)
+
+	return list
+end
+
+--============================================================
 -- UI
 --============================================================
 local Window = Library:CreateWindow({
-	Title = "Auto AI Trading",
-	Footer = "RoN Auto Trader",
+	Title = "RoN Automation",
+	Footer = "Auto Trader + Auto Builder",
 	NotifySide = "Right",
 	Resizable = true,
 	EnableSidebarResize = true
@@ -299,26 +414,30 @@ local Window = Library:CreateWindow({
 Library.ToggleKeybind = Enum.KeyCode.RightShift
 
 local Tabs = {
-	Main = Window:AddTab("Main", "user"),
+	Main = Window:AddTab("Auto Trade", "user"),
+	AutoBuild = Window:AddTab("Auto Build", "hammer"),
 	["UI Settings"] = Window:AddTab("UI Settings", "settings")
 }
 
-local Left = Tabs.Main:AddLeftGroupbox("Trading")
-local Right = Tabs.Main:AddRightGroupbox("Status")
+local TradeLeft = Tabs.Main:AddLeftGroupbox("Trading")
+local TradeRight = Tabs.Main:AddRightGroupbox("Status")
+
+local BuildLeft = Tabs.AutoBuild:AddLeftGroupbox("Building")
+local BuildRight = Tabs.AutoBuild:AddRightGroupbox("Build Status")
 
 local Toggles = Library.Toggles
 local Options = Library.Options
 
-local StatusLabel = Right:AddLabel("Status: Idle")
-local CountryLabel = Right:AddLabel("Country: ?")
-local PartnerLabel = Right:AddLabel("Partners: ?")
-local FlowLabel = Right:AddLabel("Flow: ?")
-local TradeIncomeLabel = Right:AddLabel("Trade Income: ?")
-local PercentLabel = Right:AddLabel("Trade Percent: ?")
-
-local AttemptingLabel = Right:AddLabel("Attempting to trade: (none)")
-local ValidLabel = Right:AddLabel("Valid countries: 0")
-local ValidListLabel = Right:AddLabel("Valid list: (none)")
+-- Auto Trade labels
+local StatusLabel = TradeRight:AddLabel("Status: Idle")
+local CountryLabel = TradeRight:AddLabel("Country: ?")
+local PartnerLabel = TradeRight:AddLabel("Partners: ?")
+local FlowLabel = TradeRight:AddLabel("Flow: ?")
+local TradeIncomeLabel = TradeRight:AddLabel("Trade Income: ?")
+local PercentLabel = TradeRight:AddLabel("Trade Percent: ?")
+local AttemptingLabel = TradeRight:AddLabel("Attempting to trade: (none)")
+local ValidLabel = TradeRight:AddLabel("Valid countries: 0")
+local ValidListLabel = TradeRight:AddLabel("Valid list: (none)")
 
 local function setAttempting(resource, units, name)
 	AttemptingLabel:SetText(
@@ -347,15 +466,25 @@ local function setValidList(names)
 	end
 end
 
-Left:AddToggle("Enabled", {
+-- Auto Build labels
+local BuildStatusLabel = BuildRight:AddLabel("Build Status: Idle")
+local BuildCityLabel = BuildRight:AddLabel("City: ?")
+local BuildTierLabel = BuildRight:AddLabel("Tier: ?")
+local BuildInfraLabel = BuildRight:AddLabel("Infrastructure: ?")
+local BuildFundsLabel = BuildRight:AddLabel("Funds: ?")
+local BuildQueueLabel = BuildRight:AddLabel("Queue Unit: ?")
+local BuildAttemptLabel = BuildRight:AddLabel("Attempt: (none)")
+
+-- Auto Trade controls
+TradeLeft:AddToggle("TradeEnabled", {
 	Text = "Enable Auto Trading",
 	Default = false
 }):OnChanged(function()
-	CONFIG.Enabled = Toggles.Enabled.Value
-	StatusLabel:SetText("Status: " .. (CONFIG.Enabled and "Running" or "Idle"))
+	CONFIG.TradeEnabled = Toggles.TradeEnabled.Value
+	StatusLabel:SetText("Status: " .. (CONFIG.TradeEnabled and "Running" or "Idle"))
 end)
 
-Left:AddDropdown("Resource", {
+TradeLeft:AddDropdown("Resource", {
 	Text = "Resource",
 	Values = (function()
 		local list = {}
@@ -373,7 +502,7 @@ Left:AddDropdown("Resource", {
 	CONFIG.ResourceName = Options.Resource.Value
 end)
 
-Left:AddSlider("TargetPercent", {
+TradeLeft:AddSlider("TargetPercent", {
 	Text = "Trade Percent",
 	Default = 79,
 	Min = 0,
@@ -384,10 +513,9 @@ Left:AddSlider("TargetPercent", {
 	CONFIG.TargetPercent = v / 100
 end)
 
--- 0.0 -> 10.0 in 0.1 steps (Obsidian uses Rounding as decimals)
-Left:AddSlider("Delay", {
-	Text = "Loop Delay",
-	Default = 2.0,
+TradeLeft:AddSlider("Delay", {
+	Text = "Trade Loop Delay",
+	Default = 0.8,
 	Min = 0,
 	Max = 10,
 	Rounding = 1,
@@ -396,7 +524,7 @@ Left:AddSlider("Delay", {
 	CONFIG.DelaySeconds = v
 end)
 
-Left:AddSlider("Cooldown", {
+TradeLeft:AddSlider("Cooldown", {
 	Text = "Reject Cooldown",
 	Default = 120,
 	Min = 10,
@@ -407,12 +535,12 @@ Left:AddSlider("Cooldown", {
 	CONFIG.CooldownSeconds = v
 end)
 
-Left:AddButton("Run Once", function()
-	CONFIG.Enabled = true
-	Toggles.Enabled:SetValue(true)
+TradeLeft:AddButton("Run Once", function()
+	CONFIG.TradeEnabled = true
+	Toggles.TradeEnabled:SetValue(true)
 end)
 
-Left:AddButton("Unload UI", function()
+TradeLeft:AddButton("Unload UI", function()
 	if Window and Window.Destroy then
 		Window:Destroy()
 	else
@@ -424,14 +552,65 @@ Left:AddButton("Unload UI", function()
 	end
 end)
 
+-- Auto Build controls
+BuildLeft:AddToggle("AutoBuildEnabled", {
+	Text = "Enable Auto Build",
+	Default = false
+}):OnChanged(function()
+	CONFIG.AutoBuildEnabled = Toggles.AutoBuildEnabled.Value
+	BuildStatusLabel:SetText("Build Status: " .. (CONFIG.AutoBuildEnabled and "Running" or "Idle"))
+end)
+
+BuildLeft:AddDropdown("AutoBuildBuildings", {
+	Text = "Buildings (Multi-select)",
+	Values = (function()
+		local list = {}
+		for _, b in ipairs(BuildingsFolder:GetChildren()) do
+			local name = b.Name
+			if name ~= "Expand Canal" then
+				table.insert(list, name)
+			end
+		end
+		table.sort(list)
+		return list
+	end)(),
+	Default = {},
+	Searchable = true,
+	Multi = true
+}):OnChanged(function()
+	local selectedMap = Options.AutoBuildBuildings.Value
+	local ordered = {}
+
+	local values = Options.AutoBuildBuildings.Values
+	for i = 1, #values do
+		local name = values[i]
+		if selectedMap[name] then
+			ordered[#ordered + 1] = name
+		end
+	end
+
+	CONFIG.AutoBuildSelected = ordered
+end)
+
+BuildLeft:AddSlider("AutoBuildInterval", {
+	Text = "Auto Build Interval",
+	Default = 60,
+	Min = 0,
+	Max = 120,
+	Rounding = 0,
+	Suffix = "s"
+}):OnChanged(function(v)
+	CONFIG.AutoBuildIntervalSeconds = v
+end)
+
 --============================================================
 -- Theme + Save
 --============================================================
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 
-ThemeManager:SetFolder("RoN_AutoTrade")
-SaveManager:SetFolder("RoN_AutoTrade")
+ThemeManager:SetFolder("RoN_AutoTradeBuild")
+SaveManager:SetFolder("RoN_AutoTradeBuild")
 
 SaveManager:IgnoreThemeSettings()
 ThemeManager:ApplyToTab(Tabs["UI Settings"])
@@ -440,7 +619,7 @@ ThemeManager:LoadDefault()
 SaveManager:LoadAutoloadConfig()
 
 --============================================================
--- Core: One attempt per loop
+-- Auto Trade: One attempt per loop
 --============================================================
 local function getValidCandidates(myCountry, resource, unitSellPrice)
 	local valid = {}
@@ -450,10 +629,11 @@ local function getValidCandidates(myCountry, resource, unitSellPrice)
 			if not hasTradeWith(myCountry, resource, target.Name) then
 				if not shouldSkipTargetSlot(target, resource) then
 					if not isOnCooldown(target.Name, resource) then
-						if not PendingAttempts[cooldownKey(target.Name, resource)] then
+						local pKey = cooldownKey(target.Name, resource)
+						if not PendingAttempts[pKey] then
 							local net = getNetIncome(target)
 
-							-- Rule: if their net is negative/zero, do not trade
+							-- Rule: target net <= 0 -> skip
 							if net and net > 0 then
 								local units = computeUnitsFromNet(net, unitSellPrice)
 								if units > 0 then
@@ -486,7 +666,6 @@ local function attemptOneTrade()
 		return
 	end
 
-	-- Only safety rule: don't trade if our Flow is negative
 	if not isFlowNonNegative(myCountry, CONFIG.ResourceName) then
 		log("Stopped: flow is negative for " .. CONFIG.ResourceName)
 		AttemptingLabel:SetText("Attempting to trade: (flow negative)")
@@ -534,7 +713,6 @@ local function attemptOneTrade()
 			return
 		end
 
-		-- Acceptance check: myCountry.Resources[Resource].Trade[target] exists
 		local accepted = tradeExists(myCountry2, CONFIG.ResourceName, pick.name)
 		if accepted then
 			clearCooldown(pick.name, CONFIG.ResourceName)
@@ -549,7 +727,99 @@ local function attemptOneTrade()
 end
 
 --============================================================
--- Loop (UI + trading)
+-- Auto Build: One attempt per interval across all cities
+--============================================================
+local function attemptAutoBuildOnce()
+	local ok = assertStillLeader()
+	if not ok then
+		BuildAttemptLabel:SetText("Attempt: (not leader)")
+		return
+	end
+
+	local list = CONFIG.AutoBuildSelected
+	if type(list) ~= "table" or #list == 0 then
+		BuildAttemptLabel:SetText("Attempt: (no buildings selected)")
+		return
+	end
+
+	local cities = getAllMyCitiesSorted()
+	if #cities == 0 then
+		BuildAttemptLabel:SetText("Attempt: (no cities found)")
+		return
+	end
+
+	if CONFIG.AutoBuildCityIndex > #cities then
+		CONFIG.AutoBuildCityIndex = 1
+	end
+
+	local city
+	local tries = 0
+
+	while tries < #cities do
+		city = cities[CONFIG.AutoBuildCityIndex]
+		CONFIG.AutoBuildCityIndex = CONFIG.AutoBuildCityIndex + 1
+		if CONFIG.AutoBuildCityIndex > #cities then
+			CONFIG.AutoBuildCityIndex = 1
+		end
+
+		tries = tries + 1
+
+		local tier = cityTier(city)
+		if type(tier) == "number" and tier >= 10 then
+			city = nil
+			continue
+		end
+
+		break
+	end
+
+	if not city then
+		BuildAttemptLabel:SetText("Attempt: (all cities tier 10)")
+		return
+	end
+
+	local tier = cityTier(city)
+	local infra = cityInfrastructure(city)
+	local funds = getMyFunds()
+	local qUnit = getQueueUnitValue(city)
+
+	BuildCityLabel:SetText("City: " .. city.Name)
+	BuildTierLabel:SetText("Tier: " .. tostring(tier))
+	BuildInfraLabel:SetText("Infrastructure: " .. tostring(infra))
+	BuildFundsLabel:SetText("Funds: " .. tostring(funds))
+	BuildQueueLabel:SetText("Queue Unit: " .. tostring(qUnit))
+
+	for i = 1, #list do
+		local buildingName = list[i]
+
+		if cityHasBuilding(city, buildingName) then
+			continue
+		end
+
+		-- Only block Infrastructure if infra is max (10)
+		if buildingName == "Infrastructure" then
+			if type(infra) == "number" and infra >= 10 then
+				continue
+			end
+		end
+
+		if not canAffordBuilding(buildingName) then
+			BuildAttemptLabel:SetText("Attempt: (can't afford " .. buildingName .. ")")
+			return
+		end
+
+		BuildAttemptLabel:SetText("Attempt: building " .. buildingName .. " in " .. city.Name)
+		logBuild("Building", buildingName, "in", city.Name)
+
+		fireCreateBuilding(city, buildingName)
+		return
+	end
+
+	BuildAttemptLabel:SetText("Attempt: (nothing to build)")
+end
+
+--============================================================
+-- Loops
 --============================================================
 task.spawn(function()
 	while true do
@@ -576,9 +846,16 @@ task.spawn(function()
 			AttemptingLabel:SetText("Attempting to trade: (none)")
 			ValidLabel:SetText("Valid countries: 0")
 			ValidListLabel:SetText("Valid list: (none)")
+
+			BuildCityLabel:SetText("City: ?")
+			BuildTierLabel:SetText("Tier: ?")
+			BuildInfraLabel:SetText("Infrastructure: ?")
+			BuildFundsLabel:SetText("Funds: ?")
+			BuildQueueLabel:SetText("Queue Unit: ?")
+			BuildAttemptLabel:SetText("Attempt: (none)")
 		end
 
-		if CONFIG.Enabled then
+		if CONFIG.TradeEnabled then
 			attemptOneTrade()
 		end
 
@@ -586,4 +863,13 @@ task.spawn(function()
 	end
 end)
 
-Library:Notify("Auto AI Trader loaded! (RightShift toggles UI)", 4)
+task.spawn(function()
+	while true do
+		if CONFIG.AutoBuildEnabled then
+			attemptAutoBuildOnce()
+		end
+		task.wait(CONFIG.AutoBuildIntervalSeconds)
+	end
+end)
+
+Library:Notify("RoN Auto Trader + Auto Builder loaded! (RightShift toggles UI)", 4)
