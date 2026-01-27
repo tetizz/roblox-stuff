@@ -52,10 +52,9 @@ local CONFIG = {
 	CooldownSeconds = 120,
 	Debug = true,
 
-	-- Auto Build
+	-- Auto Build (NO delay/interval; attempts every frame tick with throttling guard)
 	AutoBuildEnabled = false,
 	AutoBuildSelected = {},
-	AutoBuildIntervalSeconds = 60, -- slider 0..120 default 60
 	AutoBuildDebug = true,
 	AutoBuildCityIndex = 1,
 
@@ -63,8 +62,8 @@ local CONFIG = {
 	WatcherEnabled = false,
 	WatcherDebug = true,
 	WatcherNotify = true,
-	WatcherIntervalSeconds = 0.5, -- throttle checks (Heartbeat is overkill)
-	WatcherCountryFilter = "" -- substring filter; empty = all
+	WatcherIntervalSeconds = 0.5,
+	WatcherCountryFilter = ""
 }
 
 local function log(...)
@@ -401,7 +400,6 @@ local function canAffordBuilding(buildingName)
 		return false, cost, funds
 	end
 
-	-- If we can't read funds, don't block attempts
 	if type(funds) ~= "number" then
 		return true, cost, funds
 	end
@@ -449,7 +447,7 @@ local WatchRight = Tabs.Watcher:AddRightGroupbox("Watcher Status")
 local Toggles = Library.Toggles
 local Options = Library.Options
 
--- Auto Trade labels
+-- Trade labels
 local TradeStatusLabel = TradeRight:AddLabel("Status: Idle")
 local TradeCountryLabel = TradeRight:AddLabel("Country: ?")
 local TradePartnerLabel = TradeRight:AddLabel("Partners: ?")
@@ -487,7 +485,7 @@ local function setTradeValidList(names)
 	end
 end
 
--- Auto Build labels
+-- Build labels
 local BuildStatusLabel = BuildRight:AddLabel("Build Status: Idle")
 local BuildCitiesFolderLabel = BuildRight:AddLabel("Cities Folder: ?")
 local BuildCitiesCountLabel = BuildRight:AddLabel("Cities Found: 0")
@@ -505,7 +503,7 @@ local WatchLastLabel = WatchRight:AddLabel("Last Check: never")
 local WatchHitsLabel = WatchRight:AddLabel("New Funders: 0")
 
 --============================================================
--- Auto Trade controls
+-- Trade controls
 --============================================================
 TradeLeft:AddToggle("TradeEnabled", {
 	Text = "Enable Auto Trading",
@@ -579,7 +577,7 @@ TradeLeft:AddButton("Unload UI", function()
 end)
 
 --============================================================
--- Auto Build controls
+-- Build controls
 --============================================================
 BuildLeft:AddToggle("AutoBuildEnabled", {
 	Text = "Enable Auto Build",
@@ -618,17 +616,6 @@ BuildLeft:AddDropdown("AutoBuildBuildings", {
 	end
 
 	CONFIG.AutoBuildSelected = ordered
-end)
-
-BuildLeft:AddSlider("AutoBuildInterval", {
-	Text = "Auto Build Interval",
-	Default = 60,
-	Min = 0,
-	Max = 120,
-	Rounding = 0,
-	Suffix = "s"
-}):OnChanged(function(v)
-	CONFIG.AutoBuildIntervalSeconds = v
 end)
 
 --============================================================
@@ -789,8 +776,10 @@ local function attemptOneTrade()
 end
 
 --============================================================
--- Auto Build logic (one attempt per interval; rotates cities; skips Tier >= 10)
+-- Auto Build logic (NO delay: attempts continuously but is guarded per city/build)
 --============================================================
+local lastBuildAttempt = 0
+
 local function attemptAutoBuildOnce()
 	local ok = assertStillLeader()
 	if not ok then
@@ -803,12 +792,7 @@ local function attemptAutoBuildOnce()
 	BuildCitiesCountLabel:SetText("Cities Found: " .. tostring(#cities))
 
 	if #cities == 0 then
-		local names = {}
-		for _, child in ipairs(CitiesRoot:GetChildren()) do
-			names[#names + 1] = child.Name
-		end
 		BuildAttemptLabel:SetText("Attempt: (no cities found)")
-		logBuild("CitiesRoot children:", table.concat(names, ", "))
 		return
 	end
 
@@ -824,7 +808,6 @@ local function attemptAutoBuildOnce()
 
 	local city
 	local tries = 0
-
 	while tries < #cities do
 		city = cities[CONFIG.AutoBuildCityIndex]
 		CONFIG.AutoBuildCityIndex = CONFIG.AutoBuildCityIndex + 1
@@ -889,7 +872,7 @@ local function attemptAutoBuildOnce()
 end
 
 --============================================================
--- Watcher logic (Rebel funding)
+-- Watcher logic
 --============================================================
 local notifiedFunders = {}
 
@@ -992,12 +975,10 @@ task.spawn(function()
 	end
 end)
 
-task.spawn(function()
-	while true do
-		if CONFIG.AutoBuildEnabled then
-			attemptAutoBuildOnce()
-		end
-		task.wait(CONFIG.AutoBuildIntervalSeconds)
+-- Auto Build loop: no wait delay (uses RenderStepped pacing)
+RunService.RenderStepped:Connect(function()
+	if CONFIG.AutoBuildEnabled then
+		attemptAutoBuildOnce()
 	end
 end)
 
