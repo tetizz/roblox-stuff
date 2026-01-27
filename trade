@@ -10,13 +10,15 @@
 -- - Acceptance check: myCountry.Resources[Resource].Trade[target] exists after attempt
 -- - Cooldown per (country + resource) to avoid spamming rejects
 -- - Loop delay slider: 0.0 -> 10.0 in 0.1 increments, default 0.8
-
+--
 -- Auto Build rules:
 -- - Tab: Auto Build
 -- - Select multiple buildings in order (multi-select)
 -- - Remove "Expand Canal" from building list
--- - Build across every city in your nation (children of workspace.Baseplate.Cities[MyCountryName])
--- - If city Tier >= 10: stop trying to develop/build for that city (skip)
+-- - Build across every city in North American Union:
+--     workspace.Baseplate.Cities["North American Union"][CityName]
+--   (supports cities like "'Ataq")
+-- - If city Tier >= 10: skip that city (do not try Develop City)
 -- - Infrastructure cap only blocks building named "Infrastructure" (infra max 10)
 -- - Skip if city already has that building
 -- - Cost must be <= our funds/stockpile (best-effort funds detection)
@@ -36,6 +38,7 @@ local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 local CountryData = workspace:WaitForChild("CountryData")
 local GameManager = workspace:WaitForChild("GameManager")
+
 local ManageAlliance = GameManager:WaitForChild("ManageAlliance")
 local CreateBuilding = GameManager:WaitForChild("CreateBuilding")
 
@@ -45,6 +48,10 @@ local BuildingsFolder = Assets:WaitForChild("Buildings")
 
 local Baseplate = workspace:WaitForChild("Baseplate")
 local CitiesRoot = Baseplate:WaitForChild("Cities")
+
+-- Hardcoded to your nation folder for cities, per your message:
+-- workspace.Baseplate.Cities["North American Union"]["'Ataq"]
+local MY_NATION_CITIES_FOLDER = "North American Union"
 
 local CONFIG = {
 	-- Auto Trade
@@ -123,8 +130,10 @@ end
 local function getTradeFolder(country, resource)
 	local resourcesFolder = country:FindFirstChild("Resources")
 	if not resourcesFolder then return end
+
 	local res = resourcesFolder:FindFirstChild(resource)
 	if not res then return end
+
 	return res:FindFirstChild("Trade")
 end
 
@@ -296,6 +305,25 @@ end
 --============================================================
 -- Auto Build helpers
 --============================================================
+local function resolveMyCitiesFolder()
+	return CitiesRoot:FindFirstChild(MY_NATION_CITIES_FOLDER)
+end
+
+local function getAllMyCitiesSorted()
+	local folder = resolveMyCitiesFolder()
+	if not folder then
+		return {}
+	end
+
+	local list = folder:GetChildren()
+
+	table.sort(list, function(a, b)
+		return a.Name < b.Name
+	end)
+
+	return list
+end
+
 local function cityTier(city)
 	return city and city:GetAttribute("Tier")
 end
@@ -379,27 +407,6 @@ local function fireCreateBuilding(city, buildingName)
 	CreateBuilding:FireServer(unpack(args))
 end
 
-local function getAllMyCitiesSorted()
-	local ok, myCountry = assertStillLeader()
-	if not ok then return {} end
-
-	local folder = CitiesRoot:FindFirstChild(myCountry.Name)
-	if not folder then return {} end
-
-	local list = {}
-	for _, c in ipairs(folder:GetChildren()) do
-		if c:IsA("Folder") then
-			list[#list + 1] = c
-		end
-	end
-
-	table.sort(list, function(a, b)
-		return a.Name < b.Name
-	end)
-
-	return list
-end
-
 --============================================================
 -- UI
 --============================================================
@@ -468,6 +475,8 @@ end
 
 -- Auto Build labels
 local BuildStatusLabel = BuildRight:AddLabel("Build Status: Idle")
+local BuildCitiesFolderLabel = BuildRight:AddLabel("Cities Folder: ?")
+local BuildCitiesCountLabel = BuildRight:AddLabel("Cities Found: 0")
 local BuildCityLabel = BuildRight:AddLabel("City: ?")
 local BuildTierLabel = BuildRight:AddLabel("Tier: ?")
 local BuildInfraLabel = BuildRight:AddLabel("Infrastructure: ?")
@@ -533,11 +542,6 @@ TradeLeft:AddSlider("Cooldown", {
 	Suffix = "s"
 }):OnChanged(function(v)
 	CONFIG.CooldownSeconds = v
-end)
-
-TradeLeft:AddButton("Run Once", function()
-	CONFIG.TradeEnabled = true
-	Toggles.TradeEnabled:SetValue(true)
 end)
 
 TradeLeft:AddButton("Unload UI", function()
@@ -727,7 +731,7 @@ local function attemptOneTrade()
 end
 
 --============================================================
--- Auto Build: One attempt per interval across all cities
+-- Auto Build: One attempt per interval across all cities in NAU
 --============================================================
 local function attemptAutoBuildOnce()
 	local ok = assertStillLeader()
@@ -736,13 +740,19 @@ local function attemptAutoBuildOnce()
 		return
 	end
 
+	local folder = resolveMyCitiesFolder()
+	BuildCitiesFolderLabel:SetText("Cities Folder: " .. (folder and folder.Name or "(none)"))
+
 	local list = CONFIG.AutoBuildSelected
 	if type(list) ~= "table" or #list == 0 then
 		BuildAttemptLabel:SetText("Attempt: (no buildings selected)")
+		BuildCitiesCountLabel:SetText("Cities Found: 0")
 		return
 	end
 
 	local cities = getAllMyCitiesSorted()
+	BuildCitiesCountLabel:SetText("Cities Found: " .. tostring(#cities))
+
 	if #cities == 0 then
 		BuildAttemptLabel:SetText("Attempt: (no cities found)")
 		return
@@ -755,6 +765,7 @@ local function attemptAutoBuildOnce()
 	local city
 	local tries = 0
 
+	-- Pick next eligible city (tier < 10)
 	while tries < #cities do
 		city = cities[CONFIG.AutoBuildCityIndex]
 		CONFIG.AutoBuildCityIndex = CONFIG.AutoBuildCityIndex + 1
@@ -847,6 +858,8 @@ task.spawn(function()
 			ValidLabel:SetText("Valid countries: 0")
 			ValidListLabel:SetText("Valid list: (none)")
 
+			BuildCitiesFolderLabel:SetText("Cities Folder: ?")
+			BuildCitiesCountLabel:SetText("Cities Found: 0")
 			BuildCityLabel:SetText("City: ?")
 			BuildTierLabel:SetText("Tier: ?")
 			BuildInfraLabel:SetText("Infrastructure: ?")
