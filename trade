@@ -1,39 +1,23 @@
--- Rise of Nations - Auto AI Trading + Auto Build (Owner Version)
--- Auto Trade rules:
--- - Units sold = (AI net income * TradePercent / unit sell price) [fractional allowed]
--- - AI net income = Revenue.Total.Value - Expenses.Total.Value (fallback to attributes)
--- - Rule: if target net <= 0, DO NOT send a trade
--- - Rule: target must have at least 1 city in workspace.Baseplate.Cities.<CountryName>
--- - Rule: non-consumer goods capped at 5 units per trade
--- - Only safety: do not sell if our resource Flow is negative (no other caps)
--- - Multiplier fixed at 1
--- - Acceptance check: myCountry.Resources[Resource].Trade[target] exists after attempt
--- - Cooldown per (country + resource) to avoid spamming rejects
--- - Loop delay slider: 0.0 -> 10.0 in 0.1 increments, default 0.8
---
--- Auto Build rules:
--- - Tab: Auto Build
--- - Select multiple buildings in order (multi-select)
--- - Remove "Expand Canal" from building list
--- - Build across every city in North American Union:
---     workspace.Baseplate.Cities["North American Union"][CityName]
---   (supports cities like "'Ataq")
--- - If city Tier >= 10: skip that city (do not try Develop City)
--- - Infrastructure cap only blocks building named "Infrastructure" (infra max 10)
--- - Skip if city already has that building
--- - Cost must be <= our funds/stockpile (best-effort funds detection)
--- - Show Queue.UnitOrder.Unit value for the currently attempted city
--- - Auto Build interval slider: 0 -> 120 seconds, default 60
+-- Rise of Nations - Auto AI Trading + Auto Build + Watcher (Owner Version)
+-- (Formatting: one space around = )
 
+--============================================================
+-- Obsidian UI
+--============================================================
 local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
 local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
 local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
 
+--============================================================
+-- Services / Refs
+--============================================================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local workspace = game:GetService("Workspace")
 local CoreGui = game:GetService("CoreGui")
+local StarterGui = game:GetService("StarterGui")
 
 local LocalPlayer = Players.LocalPlayer
 local CountryData = workspace:WaitForChild("CountryData")
@@ -49,18 +33,20 @@ local BuildingsFolder = Assets:WaitForChild("Buildings")
 local Baseplate = workspace:WaitForChild("Baseplate")
 local CitiesRoot = Baseplate:WaitForChild("Cities")
 
--- Hardcoded to your nation folder for cities, per your message:
--- workspace.Baseplate.Cities["North American Union"]["'Ataq"]
+-- Hardcoded to your cities folder name (per your message)
 local MY_NATION_CITIES_FOLDER = "North American Union"
 
+--============================================================
+-- CONFIG
+--============================================================
 local CONFIG = {
 	-- Auto Trade
 	TradeEnabled = false,
 	ResourceName = "Consumer Goods",
-	TargetPercent = 0.79, -- slider 0% -> 80%, default 79%
+	TargetPercent = 0.79,
 	Multiplier = 1,
-	DelaySeconds = 0.8, -- default 0.8
-	MinUnits = 0.1, -- allow fractional
+	DelaySeconds = 0.8, -- default trade loop delay
+	MinUnits = 0.1,
 	SkipIfTargetSlotOccupied = true,
 	AttemptCheckDelay = 1.5,
 	CooldownSeconds = 120,
@@ -68,10 +54,17 @@ local CONFIG = {
 
 	-- Auto Build
 	AutoBuildEnabled = false,
-	AutoBuildSelected = {}, -- ordered list from multi-select
-	AutoBuildIntervalSeconds = 60, -- slider 0 -> 120 default 60
+	AutoBuildSelected = {},
+	AutoBuildIntervalSeconds = 60, -- slider 0..120 default 60
 	AutoBuildDebug = true,
-	AutoBuildCityIndex = 1
+	AutoBuildCityIndex = 1,
+
+	-- Watcher
+	WatcherEnabled = false,
+	WatcherDebug = true,
+	WatcherNotify = true,
+	WatcherIntervalSeconds = 0.5, -- throttle checks (Heartbeat is overkill)
+	WatcherCountryFilter = "" -- substring filter; empty = all
 }
 
 local function log(...)
@@ -86,19 +79,31 @@ local function logBuild(...)
 	end
 end
 
+local function logWatch(...)
+	if CONFIG.WatcherDebug then
+		print("[Watcher]", ...)
+	end
+end
+
 local function now()
 	return os.clock()
 end
 
 --============================================================
--- Common helpers
+-- Leader detection (robust)
 --============================================================
 local function getMyCountryFolder()
-	local myName = LocalPlayer.Name
+	local name = LocalPlayer.Name
+	local display = LocalPlayer.DisplayName
+	local userId = tostring(LocalPlayer.UserId)
+
 	for _, country in ipairs(CountryData:GetChildren()) do
 		local leader = country:FindFirstChild("Leader")
-		if leader and leader.Value == myName then
-			return country
+		if leader then
+			local v = tostring(leader.Value)
+			if v == name or v == display or v == userId then
+				return country
+			end
 		end
 	end
 end
@@ -113,7 +118,42 @@ end
 
 local function isAICountry(country)
 	local leader = country:FindFirstChild("Leader")
-	return leader and string.find(leader.Value, "AI") ~= nil
+	return leader and string.find(tostring(leader.Value), "AI") ~= nil
+end
+
+--============================================================
+-- Cities helpers (NAU folder resolve)
+--============================================================
+local function normalizeName(s)
+	return (tostring(s or ""):lower():gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function resolveMyCitiesFolder()
+	local exact = CitiesRoot:FindFirstChild(MY_NATION_CITIES_FOLDER)
+	if exact then
+		return exact
+	end
+
+	local target = normalizeName(MY_NATION_CITIES_FOLDER)
+	for _, child in ipairs(CitiesRoot:GetChildren()) do
+		if normalizeName(child.Name) == target then
+			return child
+		end
+	end
+end
+
+local function getAllMyCitiesSorted()
+	local folder = resolveMyCitiesFolder()
+	if not folder then
+		return {}, nil
+	end
+
+	local list = folder:GetChildren()
+	table.sort(list, function(a, b)
+		return a.Name < b.Name
+	end)
+
+	return list, folder
 end
 
 local function countryHasAtLeastOneCity(countryName)
@@ -130,10 +170,8 @@ end
 local function getTradeFolder(country, resource)
 	local resourcesFolder = country:FindFirstChild("Resources")
 	if not resourcesFolder then return end
-
 	local res = resourcesFolder:FindFirstChild(resource)
 	if not res then return end
-
 	return res:FindFirstChild("Trade")
 end
 
@@ -161,10 +199,8 @@ end
 local function getMyFlow(country, resource)
 	local resourcesFolder = country:FindFirstChild("Resources")
 	if not resourcesFolder then return end
-
 	local res = resourcesFolder:FindFirstChild(resource)
 	if not res then return end
-
 	local flow = res:FindFirstChild("Flow")
 	return flow and flow.Value
 end
@@ -186,7 +222,6 @@ end
 local function getRevenueTotalValue(country)
 	local econ = country:FindFirstChild("Economy")
 	if not econ then return end
-
 	local revenue = econ:FindFirstChild("Revenue")
 	if not revenue then return end
 
@@ -201,7 +236,6 @@ end
 local function getExpensesTotalValue(country)
 	local econ = country:FindFirstChild("Economy")
 	if not econ then return end
-
 	local expenses = econ:FindFirstChild("Expenses")
 	if not expenses then return end
 
@@ -263,13 +297,10 @@ end
 local function getTradeIncome(country)
 	local econ = country:FindFirstChild("Economy")
 	if not econ then return end
-
 	local revenue = econ:FindFirstChild("Revenue")
 	if not revenue then return end
-
 	local tradeExport = revenue:FindFirstChild("TradeExport")
 	if not tradeExport then return end
-
 	return tradeExport.Value
 end
 
@@ -305,25 +336,6 @@ end
 --============================================================
 -- Auto Build helpers
 --============================================================
-local function resolveMyCitiesFolder()
-	return CitiesRoot:FindFirstChild(MY_NATION_CITIES_FOLDER)
-end
-
-local function getAllMyCitiesSorted()
-	local folder = resolveMyCitiesFolder()
-	if not folder then
-		return {}
-	end
-
-	local list = folder:GetChildren()
-
-	table.sort(list, function(a, b)
-		return a.Name < b.Name
-	end)
-
-	return list
-end
-
 local function cityTier(city)
 	return city and city:GetAttribute("Tier")
 end
@@ -359,44 +371,42 @@ end
 
 local function getMyFunds()
 	local ok, myCountry = assertStillLeader()
-	if not ok then return end
+	if not ok then
+		return nil, "not leader"
+	end
 
 	local econ = myCountry:FindFirstChild("Economy")
 	if econ then
-		local balance = econ:FindFirstChild("Balance")
-		if balance and type(balance.Value) == "number" then
-			return balance.Value
-		end
+		for _, key in ipairs({ "Balance", "Money", "Stockpile" }) do
+			local obj = econ:FindFirstChild(key)
+			if obj and type(obj.Value) == "number" then
+				return obj.Value, key
+			end
 
-		local stockpile = econ:FindFirstChild("Stockpile")
-		if stockpile and type(stockpile.Value) == "number" then
-			return stockpile.Value
-		end
-
-		local money = econ:FindFirstChild("Money")
-		if money and type(money.Value) == "number" then
-			return money.Value
-		end
-
-		local balAttr = econ:GetAttribute("Balance")
-		if type(balAttr) == "number" then
-			return balAttr
-		end
-
-		local stockAttr = econ:GetAttribute("Stockpile")
-		if type(stockAttr) == "number" then
-			return stockAttr
+			local attr = econ:GetAttribute(key)
+			if type(attr) == "number" then
+				return attr, key
+			end
 		end
 	end
+
+	return nil, "unknown"
 end
 
 local function canAffordBuilding(buildingName)
 	local cost = getBuildingCost(buildingName)
 	local funds = getMyFunds()
-	if type(cost) ~= "number" or type(funds) ~= "number" then
-		return false
+
+	if type(cost) ~= "number" then
+		return false, cost, funds
 	end
-	return cost <= funds
+
+	-- If we can't read funds, don't block attempts
+	if type(funds) ~= "number" then
+		return true, cost, funds
+	end
+
+	return cost <= funds, cost, funds
 end
 
 local function fireCreateBuilding(city, buildingName)
@@ -412,7 +422,7 @@ end
 --============================================================
 local Window = Library:CreateWindow({
 	Title = "RoN Automation",
-	Footer = "Auto Trader + Auto Builder",
+	Footer = "Auto Trader + Auto Builder + Watcher",
 	NotifySide = "Right",
 	Resizable = true,
 	EnableSidebarResize = true
@@ -421,39 +431,43 @@ local Window = Library:CreateWindow({
 Library.ToggleKeybind = Enum.KeyCode.RightShift
 
 local Tabs = {
-	Main = Window:AddTab("Auto Trade", "user"),
-	AutoBuild = Window:AddTab("Auto Build", "hammer"),
+	Trade = Window:AddTab("Auto Trade", "user"),
+	Build = Window:AddTab("Auto Build", "hammer"),
+	Watcher = Window:AddTab("Watcher", "eye"),
 	["UI Settings"] = Window:AddTab("UI Settings", "settings")
 }
 
-local TradeLeft = Tabs.Main:AddLeftGroupbox("Trading")
-local TradeRight = Tabs.Main:AddRightGroupbox("Status")
+local TradeLeft = Tabs.Trade:AddLeftGroupbox("Trading")
+local TradeRight = Tabs.Trade:AddRightGroupbox("Status")
 
-local BuildLeft = Tabs.AutoBuild:AddLeftGroupbox("Building")
-local BuildRight = Tabs.AutoBuild:AddRightGroupbox("Build Status")
+local BuildLeft = Tabs.Build:AddLeftGroupbox("Building")
+local BuildRight = Tabs.Build:AddRightGroupbox("Build Status")
+
+local WatchLeft = Tabs.Watcher:AddLeftGroupbox("Rebel Funding Watcher")
+local WatchRight = Tabs.Watcher:AddRightGroupbox("Watcher Status")
 
 local Toggles = Library.Toggles
 local Options = Library.Options
 
 -- Auto Trade labels
-local StatusLabel = TradeRight:AddLabel("Status: Idle")
-local CountryLabel = TradeRight:AddLabel("Country: ?")
-local PartnerLabel = TradeRight:AddLabel("Partners: ?")
-local FlowLabel = TradeRight:AddLabel("Flow: ?")
+local TradeStatusLabel = TradeRight:AddLabel("Status: Idle")
+local TradeCountryLabel = TradeRight:AddLabel("Country: ?")
+local TradePartnerLabel = TradeRight:AddLabel("Partners: ?")
+local TradeFlowLabel = TradeRight:AddLabel("Flow: ?")
 local TradeIncomeLabel = TradeRight:AddLabel("Trade Income: ?")
-local PercentLabel = TradeRight:AddLabel("Trade Percent: ?")
-local AttemptingLabel = TradeRight:AddLabel("Attempting to trade: (none)")
-local ValidLabel = TradeRight:AddLabel("Valid countries: 0")
-local ValidListLabel = TradeRight:AddLabel("Valid list: (none)")
+local TradePercentLabel = TradeRight:AddLabel("Trade Percent: ?")
+local TradeAttemptingLabel = TradeRight:AddLabel("Attempting to trade: (none)")
+local TradeValidLabel = TradeRight:AddLabel("Valid countries: 0")
+local TradeValidListLabel = TradeRight:AddLabel("Valid list: (none)")
 
-local function setAttempting(resource, units, name)
-	AttemptingLabel:SetText(
+local function setTradeAttempting(resource, units, name)
+	TradeAttemptingLabel:SetText(
 		"Attempting to trade " .. tostring(units) .. " " .. tostring(resource) .. " to " .. tostring(name)
 	)
 end
 
-local function setValidList(names)
-	ValidLabel:SetText("Valid countries: " .. tostring(#names))
+local function setTradeValidList(names)
+	TradeValidLabel:SetText("Valid countries: " .. tostring(#names))
 
 	local maxShow = 12
 	local shown = {}
@@ -467,9 +481,9 @@ local function setValidList(names)
 	end
 
 	if #shown == 0 then
-		ValidListLabel:SetText("Valid list: (none)")
+		TradeValidListLabel:SetText("Valid list: (none)")
 	else
-		ValidListLabel:SetText("Valid list: " .. table.concat(shown, ", ") .. suffix)
+		TradeValidListLabel:SetText("Valid list: " .. table.concat(shown, ", ") .. suffix)
 	end
 end
 
@@ -484,13 +498,21 @@ local BuildFundsLabel = BuildRight:AddLabel("Funds: ?")
 local BuildQueueLabel = BuildRight:AddLabel("Queue Unit: ?")
 local BuildAttemptLabel = BuildRight:AddLabel("Attempt: (none)")
 
+-- Watcher labels
+local WatchStatusLabel = WatchRight:AddLabel("Watcher: Idle")
+local WatchFilterLabel = WatchRight:AddLabel("Country Filter: (none)")
+local WatchLastLabel = WatchRight:AddLabel("Last Check: never")
+local WatchHitsLabel = WatchRight:AddLabel("New Funders: 0")
+
+--============================================================
 -- Auto Trade controls
+--============================================================
 TradeLeft:AddToggle("TradeEnabled", {
 	Text = "Enable Auto Trading",
 	Default = false
 }):OnChanged(function()
 	CONFIG.TradeEnabled = Toggles.TradeEnabled.Value
-	StatusLabel:SetText("Status: " .. (CONFIG.TradeEnabled and "Running" or "Idle"))
+	TradeStatusLabel:SetText("Status: " .. (CONFIG.TradeEnabled and "Running" or "Idle"))
 end)
 
 TradeLeft:AddDropdown("Resource", {
@@ -556,7 +578,9 @@ TradeLeft:AddButton("Unload UI", function()
 	end
 end)
 
+--============================================================
 -- Auto Build controls
+--============================================================
 BuildLeft:AddToggle("AutoBuildEnabled", {
 	Text = "Enable Auto Build",
 	Default = false
@@ -608,13 +632,53 @@ BuildLeft:AddSlider("AutoBuildInterval", {
 end)
 
 --============================================================
+-- Watcher controls
+--============================================================
+WatchLeft:AddToggle("WatcherEnabled", {
+	Text = "Enable Rebel Funding Watcher",
+	Default = false
+}):OnChanged(function()
+	CONFIG.WatcherEnabled = Toggles.WatcherEnabled.Value
+	WatchStatusLabel:SetText("Watcher: " .. (CONFIG.WatcherEnabled and "Running" or "Idle"))
+end)
+
+WatchLeft:AddToggle("WatcherNotify", {
+	Text = "Notifications",
+	Default = true
+}):OnChanged(function()
+	CONFIG.WatcherNotify = Toggles.WatcherNotify.Value
+end)
+
+WatchLeft:AddSlider("WatcherInterval", {
+	Text = "Watcher Interval",
+	Default = 0.5,
+	Min = 0,
+	Max = 10,
+	Rounding = 1,
+	Suffix = "s"
+}):OnChanged(function(v)
+	CONFIG.WatcherIntervalSeconds = v
+end)
+
+WatchLeft:AddInput("WatcherFilter", {
+	Default = "",
+	Numeric = false,
+	Finished = true,
+	Text = "Country Filter (contains)",
+	Placeholder = "e.g. Mexico"
+}):OnChanged(function()
+	CONFIG.WatcherCountryFilter = tostring(Options.WatcherFilter.Value or "")
+	WatchFilterLabel:SetText("Country Filter: " .. (CONFIG.WatcherCountryFilter == "" and "(none)" or CONFIG.WatcherCountryFilter))
+end)
+
+--============================================================
 -- Theme + Save
 --============================================================
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 
-ThemeManager:SetFolder("RoN_AutoTradeBuild")
-SaveManager:SetFolder("RoN_AutoTradeBuild")
+ThemeManager:SetFolder("RoN_AutoTradeBuildWatch")
+SaveManager:SetFolder("RoN_AutoTradeBuildWatch")
 
 SaveManager:IgnoreThemeSettings()
 ThemeManager:ApplyToTab(Tabs["UI Settings"])
@@ -623,7 +687,7 @@ ThemeManager:LoadDefault()
 SaveManager:LoadAutoloadConfig()
 
 --============================================================
--- Auto Trade: One attempt per loop
+-- Auto Trade logic
 --============================================================
 local function getValidCandidates(myCountry, resource, unitSellPrice)
 	local valid = {}
@@ -636,8 +700,6 @@ local function getValidCandidates(myCountry, resource, unitSellPrice)
 						local pKey = cooldownKey(target.Name, resource)
 						if not PendingAttempts[pKey] then
 							local net = getNetIncome(target)
-
-							-- Rule: target net <= 0 -> skip
 							if net and net > 0 then
 								local units = computeUnitsFromNet(net, unitSellPrice)
 								if units > 0 then
@@ -665,22 +727,22 @@ end
 local function attemptOneTrade()
 	local ok, myCountry = assertStillLeader()
 	if not ok then
-		AttemptingLabel:SetText("Attempting to trade: (not leader)")
-		setValidList({})
+		TradeAttemptingLabel:SetText("Attempting to trade: (not leader)")
+		setTradeValidList({})
 		return
 	end
 
 	if not isFlowNonNegative(myCountry, CONFIG.ResourceName) then
 		log("Stopped: flow is negative for " .. CONFIG.ResourceName)
-		AttemptingLabel:SetText("Attempting to trade: (flow negative)")
-		setValidList({})
+		TradeAttemptingLabel:SetText("Attempting to trade: (flow negative)")
+		setTradeValidList({})
 		return
 	end
 
 	local price = getUnitSellPrice(CONFIG.ResourceName)
 	if not price then
-		AttemptingLabel:SetText("Attempting to trade: (no price)")
-		setValidList({})
+		TradeAttemptingLabel:SetText("Attempting to trade: (no price)")
+		setTradeValidList({})
 		return
 	end
 
@@ -690,22 +752,18 @@ local function attemptOneTrade()
 	for i = 1, #candidates do
 		namesOnly[i] = candidates[i].name
 	end
-	setValidList(namesOnly)
+	setTradeValidList(namesOnly)
 
 	local pick = candidates[1]
 	if not pick then
-		AttemptingLabel:SetText("Attempting to trade: (none)")
+		TradeAttemptingLabel:SetText("Attempting to trade: (none)")
 		return
 	end
 
-	setAttempting(CONFIG.ResourceName, pick.units, pick.name)
+	setTradeAttempting(CONFIG.ResourceName, pick.units, pick.name)
 
 	local pendingKey = cooldownKey(pick.name, CONFIG.ResourceName)
-	PendingAttempts[pendingKey] = {
-		resource = CONFIG.ResourceName,
-		when = now(),
-		units = pick.units
-	}
+	PendingAttempts[pendingKey] = true
 
 	sendTrade(pick.name, CONFIG.ResourceName, pick.units)
 	log("Attempted", pick.units, CONFIG.ResourceName, "to", pick.name, "(net:", pick.net .. ")")
@@ -731,7 +789,7 @@ local function attemptOneTrade()
 end
 
 --============================================================
--- Auto Build: One attempt per interval across all cities in NAU
+-- Auto Build logic (one attempt per interval; rotates cities; skips Tier >= 10)
 --============================================================
 local function attemptAutoBuildOnce()
 	local ok = assertStillLeader()
@@ -740,21 +798,23 @@ local function attemptAutoBuildOnce()
 		return
 	end
 
-	local folder = resolveMyCitiesFolder()
+	local cities, folder = getAllMyCitiesSorted()
 	BuildCitiesFolderLabel:SetText("Cities Folder: " .. (folder and folder.Name or "(none)"))
+	BuildCitiesCountLabel:SetText("Cities Found: " .. tostring(#cities))
+
+	if #cities == 0 then
+		local names = {}
+		for _, child in ipairs(CitiesRoot:GetChildren()) do
+			names[#names + 1] = child.Name
+		end
+		BuildAttemptLabel:SetText("Attempt: (no cities found)")
+		logBuild("CitiesRoot children:", table.concat(names, ", "))
+		return
+	end
 
 	local list = CONFIG.AutoBuildSelected
 	if type(list) ~= "table" or #list == 0 then
 		BuildAttemptLabel:SetText("Attempt: (no buildings selected)")
-		BuildCitiesCountLabel:SetText("Cities Found: 0")
-		return
-	end
-
-	local cities = getAllMyCitiesSorted()
-	BuildCitiesCountLabel:SetText("Cities Found: " .. tostring(#cities))
-
-	if #cities == 0 then
-		BuildAttemptLabel:SetText("Attempt: (no cities found)")
 		return
 	end
 
@@ -765,7 +825,6 @@ local function attemptAutoBuildOnce()
 	local city
 	local tries = 0
 
-	-- Pick next eligible city (tier < 10)
 	while tries < #cities do
 		city = cities[CONFIG.AutoBuildCityIndex]
 		CONFIG.AutoBuildCityIndex = CONFIG.AutoBuildCityIndex + 1
@@ -791,13 +850,13 @@ local function attemptAutoBuildOnce()
 
 	local tier = cityTier(city)
 	local infra = cityInfrastructure(city)
-	local funds = getMyFunds()
+	local funds, source = getMyFunds()
 	local qUnit = getQueueUnitValue(city)
 
 	BuildCityLabel:SetText("City: " .. city.Name)
 	BuildTierLabel:SetText("Tier: " .. tostring(tier))
 	BuildInfraLabel:SetText("Infrastructure: " .. tostring(infra))
-	BuildFundsLabel:SetText("Funds: " .. tostring(funds))
+	BuildFundsLabel:SetText("Funds: " .. tostring(funds) .. " (" .. tostring(source) .. ")")
 	BuildQueueLabel:SetText("Queue Unit: " .. tostring(qUnit))
 
 	for i = 1, #list do
@@ -807,15 +866,15 @@ local function attemptAutoBuildOnce()
 			continue
 		end
 
-		-- Only block Infrastructure if infra is max (10)
 		if buildingName == "Infrastructure" then
 			if type(infra) == "number" and infra >= 10 then
 				continue
 			end
 		end
 
-		if not canAffordBuilding(buildingName) then
-			BuildAttemptLabel:SetText("Attempt: (can't afford " .. buildingName .. ")")
+		local okAfford, cost = canAffordBuilding(buildingName)
+		if not okAfford then
+			BuildAttemptLabel:SetText("Attempt: (can't afford " .. buildingName .. ") cost=" .. tostring(cost))
 			return
 		end
 
@@ -830,42 +889,99 @@ local function attemptAutoBuildOnce()
 end
 
 --============================================================
+-- Watcher logic (Rebel funding)
+--============================================================
+local notifiedFunders = {}
+
+local function safeNotify(title, text, duration)
+	if not CONFIG.WatcherNotify then
+		return
+	end
+
+	pcall(function()
+		StarterGui:SetCore("SendNotification", {
+			Title = title,
+			Text = text,
+			Duration = duration or 5
+		})
+	end)
+end
+
+local function countryMatchesFilter(countryName)
+	local filter = tostring(CONFIG.WatcherCountryFilter or "")
+	if filter == "" then
+		return true
+	end
+	return string.find(countryName:lower(), filter:lower(), 1, true) ~= nil
+end
+
+local function checkRebelFunding()
+	local newHits = 0
+
+	for _, country in ipairs(CountryData:GetChildren()) do
+		local countryName = country.Name
+		if countryMatchesFilter(countryName) then
+			local rebelFolder = country:FindFirstChild("Rebel")
+
+			notifiedFunders[countryName] = notifiedFunders[countryName] or {}
+
+			if rebelFolder then
+				local currentFunders = {}
+
+				for _, funder in ipairs(rebelFolder:GetChildren()) do
+					local funderName = funder.Name
+					currentFunders[funderName] = true
+
+					if not notifiedFunders[countryName][funderName] then
+						newHits = newHits + 1
+						safeNotify("Rebel Funding Detected", funderName .. " is funding rebels in " .. countryName, 5)
+						logWatch(funderName .. " is funding rebels in " .. countryName)
+						notifiedFunders[countryName][funderName] = true
+					end
+				end
+
+				for prev, _ in pairs(notifiedFunders[countryName]) do
+					if not currentFunders[prev] then
+						notifiedFunders[countryName][prev] = nil
+					end
+				end
+			else
+				notifiedFunders[countryName] = {}
+			end
+		end
+	end
+
+	return newHits
+end
+
+--============================================================
 -- Loops
 --============================================================
 task.spawn(function()
 	while true do
 		local ok, myCountry = assertStillLeader()
 		if ok then
-			CountryLabel:SetText("Country: " .. myCountry.Name)
+			TradeCountryLabel:SetText("Country: " .. myCountry.Name)
 
 			local partners = getTradeCount(myCountry, CONFIG.ResourceName)
-			PartnerLabel:SetText("Partners: " .. tostring(partners))
+			TradePartnerLabel:SetText("Partners: " .. tostring(partners))
 
 			local flow = getMyFlow(myCountry, CONFIG.ResourceName)
-			FlowLabel:SetText("Flow: " .. tostring(flow))
+			TradeFlowLabel:SetText("Flow: " .. tostring(flow))
 
 			local tradeIncome = getTradeIncome(myCountry)
 			TradeIncomeLabel:SetText("Trade Income: " .. tostring(tradeIncome))
 
-			PercentLabel:SetText("Trade Percent: " .. tostring(math.floor(CONFIG.TargetPercent * 100 + 0.5)) .. "%")
+			TradePercentLabel:SetText("Trade Percent: " .. tostring(math.floor(CONFIG.TargetPercent * 100 + 0.5)) .. "%")
 		else
-			CountryLabel:SetText("Country: (not leader)")
-			PartnerLabel:SetText("Partners: ?")
-			FlowLabel:SetText("Flow: ?")
+			TradeCountryLabel:SetText("Country: (not leader)")
+			TradePartnerLabel:SetText("Partners: ?")
+			TradeFlowLabel:SetText("Flow: ?")
 			TradeIncomeLabel:SetText("Trade Income: ?")
-			PercentLabel:SetText("Trade Percent: ?")
-			AttemptingLabel:SetText("Attempting to trade: (none)")
-			ValidLabel:SetText("Valid countries: 0")
-			ValidListLabel:SetText("Valid list: (none)")
-
-			BuildCitiesFolderLabel:SetText("Cities Folder: ?")
-			BuildCitiesCountLabel:SetText("Cities Found: 0")
-			BuildCityLabel:SetText("City: ?")
-			BuildTierLabel:SetText("Tier: ?")
-			BuildInfraLabel:SetText("Infrastructure: ?")
-			BuildFundsLabel:SetText("Funds: ?")
-			BuildQueueLabel:SetText("Queue Unit: ?")
-			BuildAttemptLabel:SetText("Attempt: (none)")
+			TradePercentLabel:SetText("Trade Percent: ?")
+			TradeAttemptingLabel:SetText("Attempting to trade: (none)")
+			TradeValidLabel:SetText("Valid countries: 0")
+			TradeValidListLabel:SetText("Valid list: (none)")
 		end
 
 		if CONFIG.TradeEnabled then
@@ -885,4 +1001,20 @@ task.spawn(function()
 	end
 end)
 
-Library:Notify("RoN Auto Trader + Auto Builder loaded! (RightShift toggles UI)", 4)
+task.spawn(function()
+	local last = 0
+	while true do
+		if CONFIG.WatcherEnabled then
+			local t = now()
+			if t - last >= CONFIG.WatcherIntervalSeconds then
+				last = t
+				local hits = checkRebelFunding()
+				WatchHitsLabel:SetText("New Funders: " .. tostring(hits))
+				WatchLastLabel:SetText("Last Check: " .. string.format("%.1fs", t))
+			end
+		end
+		task.wait(0.1)
+	end
+end)
+
+Library:Notify("RoN Automation loaded! (RightShift toggles UI)", 4)
