@@ -33,9 +33,6 @@ local BuildingsFolder = Assets:WaitForChild("Buildings")
 local Baseplate = workspace:WaitForChild("Baseplate")
 local CitiesRoot = Baseplate:WaitForChild("Cities")
 
--- Your cities folder (your nation)
-local MY_NATION_CITIES_FOLDER = "North American Union"
-
 --============================================================
 -- CONFIG
 --============================================================
@@ -51,9 +48,7 @@ local CONFIG = {
 	AttemptCheckDelay = 1.5,
 	CooldownSeconds = 120,
 
-	-- Flow safety:
-	-- - Block if OUR Flow < 0
-	-- - Block if units > OUR Flow (ex: want 200 CG but flow 180 => don't send)
+	-- Flow safety for SELL trades
 	TradeBypassFlowSafety = false,
 
 	Debug = true,
@@ -63,9 +58,8 @@ local CONFIG = {
 	AutoBuildSelected = {},
 	AutoBuildCityIndex = 1,
 
-	-- Auto Resupply (can spam trades)
+	-- Auto Resupply (no bypass, no throttles)
 	AutoResupplyEnabled = false,
-	AutoResupplyBypassTargetFlow = false,
 
 	-- Watcher
 	WatcherEnabled = false,
@@ -85,11 +79,15 @@ local function log(...)
 end
 
 local function logSupply(...)
-	print("[Resupply]", ...)
+	if CONFIG.Debug then
+		print("[Resupply]", ...)
+	end
 end
 
 local function logWatch(...)
-	print("[Watcher]", ...)
+	if CONFIG.Debug then
+		print("[Watcher]", ...)
+	end
 end
 
 --============================================================
@@ -119,34 +117,16 @@ local function assertStillLeader()
 	return true, country
 end
 
-local function isAICountry(country)
-	local leader = country:FindFirstChild("Leader")
-	return leader and string.find(tostring(leader.Value), "AI") ~= nil
-end
-
 --============================================================
--- Cities helpers
+-- Cities: ALWAYS use myCountry.Name (fixes folder mismatch)
 --============================================================
-local function normalizeName(s)
-	return (tostring(s or ""):lower():gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", ""))
-end
-
-local function resolveMyCitiesFolder()
-	local exact = CitiesRoot:FindFirstChild(MY_NATION_CITIES_FOLDER)
-	if exact then
-		return exact
-	end
-
-	local target = normalizeName(MY_NATION_CITIES_FOLDER)
-	for _, child in ipairs(CitiesRoot:GetChildren()) do
-		if normalizeName(child.Name) == target then
-			return child
-		end
-	end
-end
-
 local function getAllMyCitiesSorted()
-	local folder = resolveMyCitiesFolder()
+	local ok, myCountry = assertStillLeader()
+	if not ok then
+		return {}, nil
+	end
+
+	local folder = CitiesRoot:FindFirstChild(myCountry.Name)
 	if not folder then
 		return {}, nil
 	end
@@ -159,7 +139,7 @@ local function getAllMyCitiesSorted()
 	return list, folder
 end
 
--- Requirement: target must have >= 1 city in workspace.Baseplate.Cities.<CountryName>
+-- For trade target requirement (keep your rule: must have >= 1 city)
 local function countryHasAtLeastOneCity(countryName)
 	local folder = CitiesRoot:FindFirstChild(countryName)
 	if not folder then
@@ -169,7 +149,7 @@ local function countryHasAtLeastOneCity(countryName)
 end
 
 --============================================================
--- Shared helpers: robust number read
+-- Shared helpers
 --============================================================
 local function getNumberAttrOrValueObject(inst, name)
 	if not inst then return end
@@ -183,6 +163,19 @@ local function getNumberAttrOrValueObject(inst, name)
 	if obj and obj.Value ~= nil and type(obj.Value) == "number" then
 		return obj.Value
 	end
+end
+
+local function safeNotify(title, text, duration)
+	if not CONFIG.WatcherNotify then
+		return
+	end
+	pcall(function()
+		StarterGui:SetCore("SendNotification", {
+			Title = title,
+			Text = text,
+			Duration = duration or 5
+		})
+	end)
 end
 
 --============================================================
@@ -222,7 +215,6 @@ local function getCountryResourceFlow(country, resource)
 	if not resourcesFolder then return end
 	local res = resourcesFolder:FindFirstChild(resource)
 	if not res then return end
-
 	local flow = res:FindFirstChild("Flow")
 	if flow and type(flow.Value) == "number" then
 		return flow.Value
@@ -253,6 +245,7 @@ local function getUnitSellPrice(resource)
 	return v.Value * 0.8
 end
 
+-- Net income rule: Revenue total − Expenses total (Value or attribute)
 local function getRevenueTotalValue(country)
 	local econ = country:FindFirstChild("Economy")
 	if not econ then return end
@@ -467,20 +460,26 @@ local function fireCreateBuilding(city, buildingName)
 end
 
 --============================================================
--- Auto Resupply (spam trades allowed)
+-- Auto Resupply (FIXED)
 --============================================================
 local function parseOperationalReason(reason)
-	-- Example: "Fertilizer [Need: 2.5]"
+	-- Flexible match anywhere:
+	-- "... Fertilizer [Need: 2.5] ..."  => resource = Fertilizer, need = 2.5
 	if type(reason) ~= "string" then return end
-	local resource = reason:match("^%s*([^%[]+)%s*%[")
-	local needStr = reason:match("%[Need:%s*([%d%.]+)%s*%]")
-	if not resource or not needStr then return end
-	resource = resource:gsub("^%s+", ""):gsub("%s+$", "")
-	local need = tonumber(needStr)
-	if resource == "" or type(need) ~= "number" or need <= 0 then
+
+	local res, needStr = reason:match("([%a%s%-%_]+)%s*%[Need:%s*([%d%.]+)%s*%]")
+	if not res or not needStr then
 		return
 	end
-	return resource, need
+
+	res = res:gsub("^%s+", ""):gsub("%s+$", "")
+	local need = tonumber(needStr)
+
+	if res == "" or type(need) ~= "number" or need <= 0 then
+		return
+	end
+
+	return res, need
 end
 
 local function isBuildingOperational(buildingInstance)
@@ -488,10 +487,12 @@ local function isBuildingOperational(buildingInstance)
 	if type(a) == "boolean" then
 		return a
 	end
+
 	local obj = buildingInstance:FindFirstChild("Operational")
 	if obj and typeof(obj.Value) == "boolean" then
 		return obj.Value
 	end
+
 	return nil
 end
 
@@ -500,42 +501,34 @@ local function getBuildingOperationalReason(buildingInstance)
 	if type(a) == "string" and a ~= "" then
 		return a
 	end
+
 	local obj = buildingInstance:FindFirstChild("Operational_Reason")
 	if obj and typeof(obj.Value) == "string" then
 		return obj.Value
 	end
 end
 
-local function getAllSupplierCountriesForResource(resourceName)
+local function getAllSupplierCountriesForResource(myCountry, resourceName)
+	-- Suppliers = ANY country with Flow > 0 for that resource, excluding us.
 	local suppliers = {}
 
 	for _, c in ipairs(CountryData:GetChildren()) do
-		if isAICountry(c) and countryHasAtLeastOneCity(c.Name) then
+		if c ~= myCountry then
 			local flow = getCountryResourceFlow(c, resourceName)
-			if CONFIG.AutoResupplyBypassTargetFlow then
+			if type(flow) == "number" and flow > 0 then
 				suppliers[#suppliers + 1] = { name = c.Name, flow = flow }
-			else
-				if type(flow) == "number" and flow > 0 then
-					suppliers[#suppliers + 1] = { name = c.Name, flow = flow }
-				end
 			end
 		end
 	end
 
 	table.sort(suppliers, function(a, b)
-		local af = (type(a.flow) == "number" and a.flow or 0)
-		local bf = (type(b.flow) == "number" and b.flow or 0)
-		return af > bf
+		return a.flow > b.flow
 	end)
 
 	return suppliers
 end
 
-local function sendBuy(targetCountry, resourceName, amount)
-	sendTrade(targetCountry, resourceName, amount, "Buy")
-end
-
-local function buyResourceFromSuppliers(resourceName, needAmount)
+local function buyResourceFromSuppliers(myCountry, resourceName, needAmount)
 	local remaining = needAmount
 	local boughtTotal = 0
 
@@ -543,7 +536,12 @@ local function buyResourceFromSuppliers(resourceName, needAmount)
 		return false, 0
 	end
 
-	local suppliers = getAllSupplierCountriesForResource(resourceName)
+	local suppliers = getAllSupplierCountriesForResource(myCountry, resourceName)
+
+	-- If no suppliers, we can’t do anything.
+	if #suppliers == 0 then
+		return false, 0
+	end
 
 	for i = 1, #suppliers do
 		if remaining <= 0 then
@@ -551,20 +549,11 @@ local function buyResourceFromSuppliers(resourceName, needAmount)
 		end
 
 		local s = suppliers[i]
-		local buyAmount
-
-		if CONFIG.AutoResupplyBypassTargetFlow then
-			buyAmount = remaining
-		else
-			local available = s.flow
-			if type(available) ~= "number" or available <= 0 then
-				continue
-			end
-			buyAmount = math.min(remaining, available)
-		end
+		local buyAmount = math.min(remaining, s.flow)
 
 		if buyAmount > 0 then
-			sendBuy(s.name, resourceName, buyAmount)
+			-- Buy from supplier
+			sendTrade(s.name, resourceName, buyAmount, "Buy")
 			boughtTotal = boughtTotal + buyAmount
 			remaining = remaining - buyAmount
 		end
@@ -576,12 +565,16 @@ end
 local function scanAndResupplyOnce()
 	local fixed = {}
 
-	local ok = assertStillLeader()
+	local ok, myCountry = assertStillLeader()
 	if not ok then
 		return fixed
 	end
 
 	local cities, _ = getAllMyCitiesSorted()
+	if #cities == 0 then
+		return fixed
+	end
+
 	for _, city in ipairs(cities) do
 		local buildingsFolder = city:FindFirstChild("Buildings")
 		if buildingsFolder then
@@ -590,11 +583,12 @@ local function scanAndResupplyOnce()
 				if op == false then
 					local reason = getBuildingOperationalReason(b)
 					local resName, need = parseOperationalReason(reason)
-					if resName and need then
-						local success, bought = buyResourceFromSuppliers(resName, need)
-						logSupply("Resupply:", city.Name, b.Name, "need", need, resName, "bought", bought, "success", success)
 
-						-- Best-effort: this may flip true next frame
+					if resName and need then
+						local success, bought = buyResourceFromSuppliers(myCountry, resName, need)
+						logSupply("Resupply:", city.Name, b.Name, "reason:", tostring(reason), "need:", need, resName, "bought:", bought, "success:", success)
+
+						-- It may flip true next frame; we still count “attempted”
 						local opNow = isBuildingOperational(b)
 						if opNow == true then
 							fixed[#fixed + 1] = { city = city.Name, building = b.Name }
@@ -669,8 +663,10 @@ local BuildAttemptLabel = BuildRight:AddLabel("Attempt: (none)")
 
 -- Resupply labels
 local SupplyStatusLabel = SupplyRight:AddLabel("Resupply: Idle")
+local SupplyCitiesLabel = SupplyRight:AddLabel("Cities: 0")
 local SupplyLastLabel = SupplyRight:AddLabel("Last: (none)")
 local SupplySuccessListLabel = SupplyRight:AddLabel("Successfully resupplied: (none)")
+local SupplyDebugLabel = SupplyRight:AddLabel("Last Resupply Debug: (none)")
 
 -- Watcher labels
 local WatchStatusLabel = WatchRight:AddLabel("Watcher: Idle")
@@ -678,9 +674,7 @@ local WatchFilterLabel = WatchRight:AddLabel("Country Filter: (none)")
 local WatchLastLabel = WatchRight:AddLabel("Last Check: never")
 local WatchHitsLabel = WatchRight:AddLabel("New Funders: 0")
 
---============================================================
 -- Trade UI helpers
---============================================================
 local function setTradeAttempting(resource, units, name)
 	TradeAttemptingLabel:SetText("Attempting to trade " .. tostring(units) .. " " .. tostring(resource) .. " to " .. tostring(name))
 end
@@ -704,6 +698,17 @@ local function setTradeValidList(names)
 	else
 		TradeValidListLabel:SetText("Valid list: " .. table.concat(shown, ", ") .. suffix)
 	end
+end
+
+local function formatFixedList(fixed)
+	if not fixed or #fixed == 0 then
+		return "(none)"
+	end
+	local parts = {}
+	for i = 1, #fixed do
+		parts[#parts + 1] = fixed[i].building .. " in " .. fixed[i].city
+	end
+	return table.concat(parts, " | ")
 end
 
 --============================================================
@@ -830,7 +835,7 @@ BuildLeft:AddDropdown("AutoBuildBuildings", {
 end)
 
 --============================================================
--- Resupply Controls
+-- Resupply Controls (NO bypass toggle)
 --============================================================
 SupplyLeft:AddToggle("AutoResupplyEnabled", {
 	Text = "Enable Auto Resupply (non-operational buildings)",
@@ -838,13 +843,6 @@ SupplyLeft:AddToggle("AutoResupplyEnabled", {
 }):OnChanged(function()
 	CONFIG.AutoResupplyEnabled = Toggles.AutoResupplyEnabled.Value
 	SupplyStatusLabel:SetText("Resupply: " .. (CONFIG.AutoResupplyEnabled and "Running" or "Idle"))
-end)
-
-SupplyLeft:AddToggle("AutoResupplyBypassTargetFlow", {
-	Text = "Bypass Supplier Flow Check (unsafe)",
-	Default = false
-}):OnChanged(function()
-	CONFIG.AutoResupplyBypassTargetFlow = Toggles.AutoResupplyBypassTargetFlow.Value
 end)
 
 --============================================================
@@ -909,7 +907,7 @@ local function getValidCandidates(myCountry, resource, unitSellPrice)
 	local valid = {}
 
 	for _, target in ipairs(CountryData:GetChildren()) do
-		if target ~= myCountry and isAICountry(target) and countryHasAtLeastOneCity(target.Name) then
+		if target ~= myCountry and countryHasAtLeastOneCity(target.Name) then
 			if not hasTradeWith(myCountry, resource, target.Name) then
 				if not shouldSkipTargetSlot(target, resource) then
 					if not isOnCooldown(target.Name, resource) then
@@ -998,7 +996,7 @@ local function attemptOneTrade()
 end
 
 --============================================================
--- Auto Build core (as before)
+-- Auto Build core (unchanged)
 --============================================================
 local function attemptAutoBuildOnce()
 	local ok = assertStillLeader()
@@ -1093,22 +1091,9 @@ local function attemptAutoBuildOnce()
 end
 
 --============================================================
--- Watcher (rebel funding)
+-- Watcher (rebel funding) - unchanged
 --============================================================
 local notifiedFunders = {}
-
-local function safeNotify(title, text, duration)
-	if not CONFIG.WatcherNotify then
-		return
-	end
-	pcall(function()
-		StarterGui:SetCore("SendNotification", {
-			Title = title,
-			Text = text,
-			Duration = duration or 5
-		})
-	end)
-end
 
 local function countryMatchesFilter(countryName)
 	local filter = tostring(CONFIG.WatcherCountryFilter or "")
@@ -1157,20 +1142,6 @@ local function checkRebelFunding()
 end
 
 --============================================================
--- Resupply loop helpers (UI status)
---============================================================
-local function formatFixedList(fixed)
-	if not fixed or #fixed == 0 then
-		return "(none)"
-	end
-	local parts = {}
-	for i = 1, #fixed do
-		parts[#parts + 1] = fixed[i].building .. " in " .. fixed[i].city
-	end
-	return table.concat(parts, " | ")
-end
-
---============================================================
 -- MAIN LOOPS
 --============================================================
 task.spawn(function()
@@ -1195,13 +1166,6 @@ task.spawn(function()
 			TradePercentLabel:SetText("Trade Percent: " .. tostring(math.floor(CONFIG.TargetPercent * 100 + 0.5)) .. "%")
 		else
 			TradeCountryLabel:SetText("Country: (not leader)")
-			TradePartnerLabel:SetText("Partners: ?")
-			TradeFlowLabel:SetText("Flow: ?")
-			TradeIncomeLabel:SetText("Trade Export: ?")
-			TradePercentLabel:SetText("Trade Percent: ?")
-			TradeAttemptingLabel:SetText("Attempting to trade: (none)")
-			TradeValidLabel:SetText("Valid countries: 0")
-			TradeValidListLabel:SetText("Valid list: (none)")
 		end
 
 		if CONFIG.TradeEnabled then
@@ -1212,13 +1176,19 @@ task.spawn(function()
 	end
 end)
 
--- Auto Build + Auto Resupply (60/sec allowed)
 RunService.RenderStepped:Connect(function()
+	-- Auto Build (60/sec allowed)
 	if CONFIG.AutoBuildEnabled then
 		attemptAutoBuildOnce()
 	end
 
+	-- Auto Resupply (spam allowed)
 	if CONFIG.AutoResupplyEnabled then
+		local ok, _ = assertStillLeader()
+		local cities, folder = getAllMyCitiesSorted()
+
+		SupplyCitiesLabel:SetText("Cities: " .. tostring(#cities) .. " (" .. tostring(folder and folder.Name or "none") .. ")")
+
 		local fixed = scanAndResupplyOnce()
 		if fixed and #fixed > 0 then
 			SupplyLastLabel:SetText("Last: " .. os.date("%X"))
@@ -1228,7 +1198,6 @@ RunService.RenderStepped:Connect(function()
 	end
 end)
 
--- Watcher loop (throttled)
 task.spawn(function()
 	local last = 0
 	while true do
