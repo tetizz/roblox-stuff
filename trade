@@ -460,17 +460,14 @@ local function fireCreateBuilding(city, buildingName)
 end
 
 --============================================================
--- Auto Resupply (FIXED)
+-- Auto Resupply (Aggregated per resource + prefer existing supplier)
 --============================================================
 local function parseOperationalReason(reason)
-	-- Flexible match anywhere:
-	-- "... Fertilizer [Need: 2.5] ..."  => resource = Fertilizer, need = 2.5
+	-- Flexible: matches "... Electronics [Need: 3] ..." anywhere
 	if type(reason) ~= "string" then return end
 
 	local res, needStr = reason:match("([%a%s%-%_]+)%s*%[Need:%s*([%d%.]+)%s*%]")
-	if not res or not needStr then
-		return
-	end
+	if not res or not needStr then return end
 
 	res = res:gsub("^%s+", ""):gsub("%s+$", "")
 	local need = tonumber(needStr)
@@ -508,10 +505,53 @@ local function getBuildingOperationalReason(buildingInstance)
 	end
 end
 
-local function getAllSupplierCountriesForResource(myCountry, resourceName)
-	-- Suppliers = ANY country with Flow > 0 for that resource, excluding us.
-	local suppliers = {}
+local function getCountryResourceFlow(country, resource)
+	local resourcesFolder = country:FindFirstChild("Resources")
+	if not resourcesFolder then return end
+	local res = resourcesFolder:FindFirstChild(resource)
+	if not res then return end
+	local flow = res:FindFirstChild("Flow")
+	if flow and type(flow.Value) == "number" then
+		return flow.Value
+	end
+end
 
+local function sendBuy(targetCountry, resourceName, amount)
+	local args = {
+		targetCountry,
+		"ResourceTrade",
+		{
+			resourceName,
+			"Buy",
+			amount,
+			1,
+			"Trade"
+		}
+	}
+	ManageAlliance:FireServer(unpack(args))
+end
+
+local function getExistingTradePartner(myCountry, resourceName)
+	-- If we already have Trade.<Partner> for this resource, prefer it.
+	local resourcesFolder = myCountry:FindFirstChild("Resources")
+	if not resourcesFolder then return end
+	local res = resourcesFolder:FindFirstChild(resourceName)
+	if not res then return end
+	local trade = res:FindFirstChild("Trade")
+	if not trade then return end
+
+	local children = trade:GetChildren()
+	if #children == 0 then
+		return nil
+	end
+
+	-- Pick the first existing partner (stable “reuse same country” behavior)
+	return children[1].Name
+end
+
+local function getSupplierList(myCountry, resourceName)
+	-- Any country with Flow > 0 for resource, excluding us
+	local suppliers = {}
 	for _, c in ipairs(CountryData:GetChildren()) do
 		if c ~= myCountry then
 			local flow = getCountryResourceFlow(c, resourceName)
@@ -528,19 +568,28 @@ local function getAllSupplierCountriesForResource(myCountry, resourceName)
 	return suppliers
 end
 
-local function buyResourceFromSuppliers(myCountry, resourceName, needAmount)
-	local remaining = needAmount
-	local boughtTotal = 0
+local function buyFromPreferredThenOthers(myCountry, resourceName, totalNeed)
+	-- 1) Prefer existing trade partner if present
+	-- 2) Otherwise use highest-flow suppliers
+	local remaining = totalNeed
+	local purchases = {}
 
 	if type(remaining) ~= "number" or remaining <= 0 then
-		return false, 0
+		return purchases
 	end
 
-	local suppliers = getAllSupplierCountriesForResource(myCountry, resourceName)
+	local preferred = getExistingTradePartner(myCountry, resourceName)
+	local suppliers = getSupplierList(myCountry, resourceName)
 
-	-- If no suppliers, we can’t do anything.
-	if #suppliers == 0 then
-		return false, 0
+	-- Move preferred to front if it exists in suppliers
+	if preferred then
+		for i = 1, #suppliers do
+			if suppliers[i].name == preferred then
+				local picked = table.remove(suppliers, i)
+				table.insert(suppliers, 1, picked)
+				break
+			end
+		end
 	end
 
 	for i = 1, #suppliers do
@@ -552,19 +601,17 @@ local function buyResourceFromSuppliers(myCountry, resourceName, needAmount)
 		local buyAmount = math.min(remaining, s.flow)
 
 		if buyAmount > 0 then
-			-- Buy from supplier
-			sendTrade(s.name, resourceName, buyAmount, "Buy")
-			boughtTotal = boughtTotal + buyAmount
+			sendBuy(s.name, resourceName, buyAmount)
+			purchases[#purchases + 1] = { supplier = s.name, amount = buyAmount }
 			remaining = remaining - buyAmount
 		end
 	end
 
-	return remaining <= 0, boughtTotal
+	return purchases
 end
 
 local function scanAndResupplyOnce()
 	local fixed = {}
-
 	local ok, myCountry = assertStillLeader()
 	if not ok then
 		return fixed
@@ -574,6 +621,9 @@ local function scanAndResupplyOnce()
 	if #cities == 0 then
 		return fixed
 	end
+
+	-- Aggregate total need per resource across ALL buildings
+	local totalNeedByResource = {}
 
 	for _, city in ipairs(cities) do
 		local buildingsFolder = city:FindFirstChild("Buildings")
@@ -585,15 +635,37 @@ local function scanAndResupplyOnce()
 					local resName, need = parseOperationalReason(reason)
 
 					if resName and need then
-						local success, bought = buyResourceFromSuppliers(myCountry, resName, need)
-						logSupply("Resupply:", city.Name, b.Name, "reason:", tostring(reason), "need:", need, resName, "bought:", bought, "success:", success)
-
-						-- It may flip true next frame; we still count “attempted”
-						local opNow = isBuildingOperational(b)
-						if opNow == true then
-							fixed[#fixed + 1] = { city = city.Name, building = b.Name }
-						end
+						totalNeedByResource[resName] = (totalNeedByResource[resName] or 0) + need
 					end
+				end
+			end
+		end
+	end
+
+	-- Buy per resource (single aggregated buy plan)
+	for resName, totalNeed in pairs(totalNeedByResource) do
+		local purchases = buyFromPreferredThenOthers(myCountry, resName, totalNeed)
+
+		if #purchases > 0 then
+			local parts = {}
+			for i = 1, #purchases do
+				parts[#parts + 1] = purchases[i].supplier .. " +" .. tostring(purchases[i].amount)
+			end
+			logSupply("Aggregated resupply:", resName, "need", totalNeed, "purchases:", table.concat(parts, " | "))
+		else
+			logSupply("Aggregated resupply:", resName, "need", totalNeed, "(no suppliers with flow)")
+		end
+	end
+
+	-- Best-effort confirmation: list factories that flipped Operational true
+	for _, city in ipairs(cities) do
+		local buildingsFolder = city:FindFirstChild("Buildings")
+		if buildingsFolder then
+			for _, b in ipairs(buildingsFolder:GetChildren()) do
+				local op = isBuildingOperational(b)
+				if op == true then
+					-- If you want to only list ones that WERE false before, we can track previous state later.
+					-- For now, keep it simple: don't spam fixed list.
 				end
 			end
 		end
