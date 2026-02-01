@@ -1,4 +1,3 @@
--- Rise of Nations - Auto AI Trading + Auto Build + Watcher + Auto Resupply (Owner Version)
 -- Formatting: one space around =
 
 --============================================================
@@ -65,7 +64,10 @@ local CONFIG = {
 	WatcherEnabled = false,
 	WatcherNotify = true,
 	WatcherIntervalSeconds = 0.25,
-	WatcherCountryFilter = ""
+	WatcherCountryFilter = "",
+
+	-- Unit Tags
+	UnitTagsEnabled = false
 }
 
 local function now()
@@ -88,6 +90,51 @@ local function logWatch(...)
 	if CONFIG.Debug then
 		print("[Watcher]", ...)
 	end
+end
+
+local function logTags(...)
+	if CONFIG.Debug then
+		print("[UnitTags]", ...)
+	end
+end
+
+--============================================================
+-- Unit Tags (Auto Force Enable)
+--============================================================
+local Units = workspace:WaitForChild("Units")
+
+local GetChildren = game.GetChildren
+local FirstChild = game.FindFirstChild
+
+local TagsRenderConn
+
+local function ForceTags()
+	for _, v in next, GetChildren(Units) do
+		local Tag = FirstChild(v, "Tag")
+		if Tag then
+			Tag.Enabled = true
+		end
+	end
+end
+
+local function StartForce()
+	if TagsRenderConn then return end
+
+	TagsRenderConn = RunService.RenderStepped:Connect(function()
+		if not CONFIG.UnitTagsEnabled then return end
+		ForceTags()
+	end)
+
+	logTags("Started force loop")
+end
+
+local function StopForce()
+	if TagsRenderConn then
+		TagsRenderConn:Disconnect()
+		TagsRenderConn = nil
+	end
+
+	logTags("Stopped force loop")
 end
 
 --============================================================
@@ -463,7 +510,6 @@ end
 -- Auto Resupply (Aggregated per resource + prefer existing supplier)
 --============================================================
 local function parseOperationalReason(reason)
-	-- Flexible: matches "... Electronics [Need: 3] ..." anywhere
 	if type(reason) ~= "string" then return end
 
 	local res, needStr = reason:match("([%a%s%-%_]+)%s*%[Need:%s*([%d%.]+)%s*%]")
@@ -505,17 +551,6 @@ local function getBuildingOperationalReason(buildingInstance)
 	end
 end
 
-local function getCountryResourceFlow(country, resource)
-	local resourcesFolder = country:FindFirstChild("Resources")
-	if not resourcesFolder then return end
-	local res = resourcesFolder:FindFirstChild(resource)
-	if not res then return end
-	local flow = res:FindFirstChild("Flow")
-	if flow and type(flow.Value) == "number" then
-		return flow.Value
-	end
-end
-
 local function sendBuy(targetCountry, resourceName, amount)
 	local args = {
 		targetCountry,
@@ -532,7 +567,6 @@ local function sendBuy(targetCountry, resourceName, amount)
 end
 
 local function getExistingTradePartner(myCountry, resourceName)
-	-- If we already have Trade.<Partner> for this resource, prefer it.
 	local resourcesFolder = myCountry:FindFirstChild("Resources")
 	if not resourcesFolder then return end
 	local res = resourcesFolder:FindFirstChild(resourceName)
@@ -545,12 +579,10 @@ local function getExistingTradePartner(myCountry, resourceName)
 		return nil
 	end
 
-	-- Pick the first existing partner (stable “reuse same country” behavior)
 	return children[1].Name
 end
 
 local function getSupplierList(myCountry, resourceName)
-	-- Any country with Flow > 0 for resource, excluding us
 	local suppliers = {}
 	for _, c in ipairs(CountryData:GetChildren()) do
 		if c ~= myCountry then
@@ -569,8 +601,6 @@ local function getSupplierList(myCountry, resourceName)
 end
 
 local function buyFromPreferredThenOthers(myCountry, resourceName, totalNeed)
-	-- 1) Prefer existing trade partner if present
-	-- 2) Otherwise use highest-flow suppliers
 	local remaining = totalNeed
 	local purchases = {}
 
@@ -581,7 +611,6 @@ local function buyFromPreferredThenOthers(myCountry, resourceName, totalNeed)
 	local preferred = getExistingTradePartner(myCountry, resourceName)
 	local suppliers = getSupplierList(myCountry, resourceName)
 
-	-- Move preferred to front if it exists in suppliers
 	if preferred then
 		for i = 1, #suppliers do
 			if suppliers[i].name == preferred then
@@ -617,12 +646,11 @@ local function scanAndResupplyOnce()
 		return fixed
 	end
 
-	local cities, _ = getAllMyCitiesSorted()
+	local cities = getAllMyCitiesSorted()
 	if #cities == 0 then
 		return fixed
 	end
 
-	-- Aggregate total need per resource across ALL buildings
 	local totalNeedByResource = {}
 
 	for _, city in ipairs(cities) do
@@ -642,7 +670,6 @@ local function scanAndResupplyOnce()
 		end
 	end
 
-	-- Buy per resource (single aggregated buy plan)
 	for resName, totalNeed in pairs(totalNeedByResource) do
 		local purchases = buyFromPreferredThenOthers(myCountry, resName, totalNeed)
 
@@ -657,20 +684,6 @@ local function scanAndResupplyOnce()
 		end
 	end
 
-	-- Best-effort confirmation: list factories that flipped Operational true
-	for _, city in ipairs(cities) do
-		local buildingsFolder = city:FindFirstChild("Buildings")
-		if buildingsFolder then
-			for _, b in ipairs(buildingsFolder:GetChildren()) do
-				local op = isBuildingOperational(b)
-				if op == true then
-					-- If you want to only list ones that WERE false before, we can track previous state later.
-					-- For now, keep it simple: don't spam fixed list.
-				end
-			end
-		end
-	end
-
 	return fixed
 end
 
@@ -678,8 +691,8 @@ end
 -- UI
 --============================================================
 local Window = Library:CreateWindow({
-	Title = "RoN Automation",
-	Footer = "Auto Trade + Auto Build + Watcher + Resupply",
+	Title = "Automation",
+	Footer = "Auto Trade + Auto Build + Watcher + Resupply + Unit Tags",
 	NotifySide = "Right",
 	Resizable = true,
 	EnableSidebarResize = true
@@ -704,7 +717,7 @@ local BuildRight = Tabs.Build:AddRightGroupbox("Build Status")
 local SupplyLeft = Tabs.Supply:AddLeftGroupbox("Auto Resupply")
 local SupplyRight = Tabs.Supply:AddRightGroupbox("Resupply Status")
 
-local WatchLeft = Tabs.Watcher:AddLeftGroupbox("Rebel Funding Watcher")
+local WatchLeft = Tabs.Watcher:AddLeftGroupbox("Watcher + Tools")
 local WatchRight = Tabs.Watcher:AddRightGroupbox("Watcher Status")
 
 local Toggles = Library.Toggles
@@ -918,7 +931,7 @@ SupplyLeft:AddToggle("AutoResupplyEnabled", {
 end)
 
 --============================================================
--- Watcher Controls
+-- Watcher Controls + Unit Tags Tools
 --============================================================
 WatchLeft:AddToggle("WatcherEnabled", {
 	Text = "Enable Rebel Funding Watcher",
@@ -957,14 +970,33 @@ WatchLeft:AddInput("WatcherFilter", {
 	WatchFilterLabel:SetText("Country Filter: " .. (CONFIG.WatcherCountryFilter == "" and "(none)" or CONFIG.WatcherCountryFilter))
 end)
 
+WatchLeft:AddDivider("Unit Tags")
+
+WatchLeft:AddToggle("UnitTagsEnabled", {
+	Text = "Auto Enable Unit Tags",
+	Default = false
+}):OnChanged(function()
+	CONFIG.UnitTagsEnabled = Toggles.UnitTagsEnabled.Value
+	if CONFIG.UnitTagsEnabled then
+		StartForce()
+		ForceTags()
+	else
+		StopForce()
+	end
+end)
+
+WatchLeft:AddButton("One Time Enable Tags", function()
+	ForceTags()
+end)
+
 --============================================================
 -- Theme + Save
 --============================================================
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 
-ThemeManager:SetFolder("RoN_Auto_All")
-SaveManager:SetFolder("RoN_Auto_All")
+ThemeManager:SetFolder("MyPlace_Auto_All")
+SaveManager:SetFolder("MyPlace_Auto_All")
 
 SaveManager:IgnoreThemeSettings()
 ThemeManager:ApplyToTab(Tabs["UI Settings"])
@@ -1163,7 +1195,7 @@ local function attemptAutoBuildOnce()
 end
 
 --============================================================
--- Watcher (rebel funding) - unchanged
+-- Watcher (rebel funding)
 --============================================================
 local notifiedFunders = {}
 
@@ -1249,16 +1281,12 @@ task.spawn(function()
 end)
 
 RunService.RenderStepped:Connect(function()
-	-- Auto Build (60/sec allowed)
 	if CONFIG.AutoBuildEnabled then
 		attemptAutoBuildOnce()
 	end
 
-	-- Auto Resupply (spam allowed)
 	if CONFIG.AutoResupplyEnabled then
-		local ok, _ = assertStillLeader()
 		local cities, folder = getAllMyCitiesSorted()
-
 		SupplyCitiesLabel:SetText("Cities: " .. tostring(#cities) .. " (" .. tostring(folder and folder.Name or "none") .. ")")
 
 		local fixed = scanAndResupplyOnce()
@@ -1286,4 +1314,4 @@ task.spawn(function()
 	end
 end)
 
-Library:Notify("RoN Automation loaded! (RightShift toggles UI)", 4)
+Library:Notify("Automation loaded! (RightShift toggles UI)", 4)
