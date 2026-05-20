@@ -26,10 +26,13 @@ local ManageAlliance = GameManager:WaitForChild("ManageAlliance")
 local CreateBuilding = GameManager:WaitForChild("CreateBuilding")
 local JustifyWar = GameManager:WaitForChild("JustifyWar")
 local CountryWorker = GameManager:WaitForChild("CountryWorker")
+local ChangeLaw = GameManager:WaitForChild("ChangeLaw")
 
 local Assets = ReplicatedStorage:WaitForChild("Assets")
 local Resources = Assets:WaitForChild("Resources")
 local BuildingsFolder = Assets:WaitForChild("Buildings")
+local LawsFolder = Assets:FindFirstChild("Laws")
+local PoliciesFolder = LawsFolder and LawsFolder:FindFirstChild("Policies")
 
 local Baseplate = workspace:WaitForChild("Baseplate")
 local CitiesRoot = Baseplate:WaitForChild("Cities")
@@ -67,6 +70,7 @@ local CONFIG = {
 	AutoResupplyEnabled = false, -- AI-only always
 	AutoResupplyOnlyNegativeFlow = true,
 	UnitTagsEnabled = false,
+	AutoPolicyEnabled = false,
 
 	WatcherEnabled = false, -- rebel funding watcher
 	JustifyWatchEnabled = false, -- justification progress watcher
@@ -1298,6 +1302,116 @@ local function doAutoPromote()
 end
 
 --============================================================
+-- Auto Policy
+--============================================================
+local Policy = {
+	Info = {},
+	RecentlyEnacted = {},
+	LastStatus = "Idle"
+}
+
+local function sanitizePolicyKey(name)
+	return tostring(name):gsub("[^%w]", "_")
+end
+
+local function getPolicyPower(myCountry)
+	local power = myCountry and myCountry:FindFirstChild("Power")
+	local political = power and power:FindFirstChild("Political")
+	if not political then
+		return 0
+	end
+	if political:IsA("Vector3Value") and typeof(political.Value) == "Vector3" then
+		return tonumber(political.Value.X) or 0
+	end
+	return (typeof(political.Value) == "number" and political.Value) or 0
+end
+
+local function getActivePolicies(myCountry)
+	local active = {}
+	local laws = myCountry and myCountry:FindFirstChild("Laws")
+	local policies = laws and laws:FindFirstChild("Policies")
+	if policies then
+		for _, policy in ipairs(policies:GetChildren()) do
+			active[policy.Name] = true
+		end
+	end
+	return active
+end
+
+local function getPolicyCost(policy)
+	local costObj = policy:FindFirstChild("PPCost")
+	if costObj and costObj:IsA("Vector3Value") then
+		return tonumber(costObj.Value.X) or 0
+	end
+	if costObj and typeof(costObj.Value) == "number" then
+		return costObj.Value
+	end
+	return 0
+end
+
+local function buildPolicyInfo()
+	Policy.Info = {}
+	if not PoliciesFolder then
+		return
+	end
+
+	local policies = PoliciesFolder:GetChildren()
+	table.sort(policies, function(a, b)
+		return a.Name < b.Name
+	end)
+
+	for _, policy in ipairs(policies) do
+		Policy.Info[#Policy.Info + 1] = {
+			name = policy.Name,
+			key = "Policy_" .. sanitizePolicyKey(policy.Name),
+			cost = getPolicyCost(policy)
+		}
+	end
+end
+
+local function cleanupPolicyMemory(active)
+	for name in pairs(Policy.RecentlyEnacted) do
+		if not active[name] then
+			Policy.RecentlyEnacted[name] = nil
+		end
+	end
+end
+
+local function doAutoPolicy()
+	if not PoliciesFolder then
+		Policy.LastStatus = "No policies folder"
+		return
+	end
+
+	local ok, myCountry = assertStillLeader()
+	if not ok then
+		Policy.LastStatus = "Not leader"
+		return
+	end
+
+	local active = getActivePolicies(myCountry)
+	cleanupPolicyMemory(active)
+
+	local power = getPolicyPower(myCountry)
+	local enacted = 0
+	local selected = 0
+
+	for _, policy in ipairs(Policy.Info) do
+		local toggle = Library.Toggles[policy.key]
+		if toggle and toggle.Value then
+			selected = selected + 1
+			if not active[policy.name] and not Policy.RecentlyEnacted[policy.name] and power >= policy.cost then
+				ChangeLaw:FireServer("Policy", policy.name)
+				Policy.RecentlyEnacted[policy.name] = true
+				enacted = enacted + 1
+			end
+		end
+	end
+
+	Policy.LastStatus = "Selected: " .. tostring(selected) .. " | Enacted: " .. tostring(enacted) .. " | Power: " .. tostring(power)
+end
+
+--============================================================
 -- Auto Trade core (AI-only, updates list, skips flow-exceed candidates)
 --============================================================
 local function getValidCandidates(myCountry, resource, unitSellPrice)
@@ -1608,6 +1722,7 @@ local Tabs = {
 	War = Window:AddTab("War", "swords"),
 	Build = Window:AddTab("Build", "hammer"),
 	Resources = Window:AddTab("Resources", "package"),
+	Policies = Window:AddTab("Policies", "sliders"),
 	Watchers = Window:AddTab("Watchers", "bell"),
 	Settings = Window:AddTab("Settings", "settings")
 }
@@ -1623,6 +1738,9 @@ local BuildRight = Tabs.Build:AddRightGroupbox("Build Status")
 
 local ResourcesLeft = Tabs.Resources:AddLeftGroupbox("Resource Automation")
 local ResourcesRight = Tabs.Resources:AddRightGroupbox("Resource Status")
+
+local PoliciesLeft = Tabs.Policies:AddLeftGroupbox("Auto Policy")
+local PoliciesRight = Tabs.Policies:AddRightGroupbox("Policy Status")
 
 local WatchersLeft = Tabs.Watchers:AddLeftGroupbox("Watchers")
 local WatchersRight = Tabs.Watchers:AddRightGroupbox("Watcher Status")
@@ -1649,6 +1767,9 @@ local PromoteStatusLabel = WarRight:AddLabel("Auto Promote: Idle")
 local AutoResupplyStatusLabel = ResourcesRight:AddLabel("Auto Resupply: Idle")
 local AutoResupplyDetailsLabel = ResourcesRight:AddLabel("Resupply Details: (none)")
 local UnitTagsStatusLabel = ResourcesRight:AddLabel("Unit Tags: Idle")
+
+local PolicyStatusLabel = PoliciesRight:AddLabel("Auto Policy: Idle")
+local PolicyCountLabel = PoliciesRight:AddLabel("Policies Loaded: 0")
 
 local WatcherStatusLabel = WatchersRight:AddLabel("Rebel Watch: Idle")
 local JustWatchStatusLabel = WatchersRight:AddLabel("Justify Watch: Idle")
@@ -1858,6 +1979,28 @@ ResourcesLeft:AddToggle("UnitTagsEnabled", {
 	UnitTagsStatusLabel:SetText("Unit Tags: " .. (CONFIG.UnitTagsEnabled and "Running" or "Idle"))
 end)
 
+buildPolicyInfo()
+PolicyCountLabel:SetText("Policies Loaded: " .. tostring(#Policy.Info))
+
+PoliciesLeft:AddToggle("AutoPolicyEnabled", {
+	Text = "Auto Policy",
+	Default = false
+}):OnChanged(function()
+	CONFIG.AutoPolicyEnabled = Toggles.AutoPolicyEnabled.Value
+	PolicyStatusLabel:SetText("Auto Policy: " .. (CONFIG.AutoPolicyEnabled and "Running" or "Idle"))
+end)
+
+if #Policy.Info > 0 then
+	for _, policy in ipairs(Policy.Info) do
+		PoliciesLeft:AddToggle(policy.key, {
+			Text = policy.name,
+			Default = false
+		})
+	end
+else
+	PoliciesRight:AddLabel("Policy controls unavailable")
+end
+
 WatchersLeft:AddToggle("WatcherEnabled", {
 	Text = "Rebel Watch (constant)",
 	Default = false
@@ -2011,6 +2154,18 @@ task.spawn(function()
 		if CONFIG.UnitTagsEnabled then
 			runEvery("unit_tags", 0.25, function()
 				ForceTags()
+			end)
+		end
+
+		-- Auto Policy
+		if CONFIG.AutoPolicyEnabled then
+			runEvery("auto_policy", 1.0, function()
+				doAutoPolicy()
+				PolicyStatusLabel:SetText("Auto Policy: " .. Policy.LastStatus)
+			end)
+		else
+			runEvery("auto_policy_idle", 0.5, function()
+				PolicyStatusLabel:SetText("Auto Policy: Idle")
 			end)
 		end
 
