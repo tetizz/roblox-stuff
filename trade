@@ -62,7 +62,10 @@ local CONFIG = {
 	-- Automations toggles
 	AutoBuildEnabled = false,
 	AutoBuildSelected = {},
+	AutoBuildPriority = "Selected Order",
+	AutoBuildSkipQueued = true,
 	AutoResupplyEnabled = false, -- AI-only always
+	AutoResupplyOnlyNegativeFlow = true,
 	UnitTagsEnabled = false,
 
 	WatcherEnabled = false, -- rebel funding watcher
@@ -70,6 +73,9 @@ local CONFIG = {
 	LeaderWatchEnabled = false, -- corrupt leader watcher
 	AutoJustifyEnabled = false,
 	AutoJustifyAIOnly = true,
+	AutoJustifySkipAllies = true,
+	AutoJustifySkipWars = true,
+	AutoJustifyRequireCities = true,
 	AutoJustifyRetrySeconds = 60,
 	AutoDeclareEnabled = false,
 	AutoPeaceEnabled = false,
@@ -773,17 +779,22 @@ local function scanAndResupplyOnce()
 
 		needTotal = tonumber(needTotal) or 0
 		if needTotal > 0 then
-			local currentTotalX = getMyCurrentTotalTradeX(myCountry, resName)
-			local delta = needTotal - currentTotalX
+			local flow = getCountryResourceFlow(myCountry, resName)
+			if CONFIG.AutoResupplyOnlyNegativeFlow and (type(flow) ~= "number" or flow >= 0) then
+				statuses[#statuses + 1] = resName .. " skipped flow=" .. tostring(flow)
+			else
+				local currentTotalX = getMyCurrentTotalTradeX(myCountry, resName)
+				local delta = needTotal - currentTotalX
 
-			if delta > 0 then
-				local before = #statuses
-				local bought = attemptResupplyResource(myCountry, resName, delta, playerSet, statuses)
-				local usedTrades = #statuses - before
-				totalTradesBudget = totalTradesBudget - usedTrades
+				if delta > 0 then
+					local before = #statuses
+					local bought = attemptResupplyResource(myCountry, resName, delta, playerSet, statuses)
+					local usedTrades = #statuses - before
+					totalTradesBudget = totalTradesBudget - usedTrades
 
-				if bought > 0 then
-					debugPrint("[Resupply]", "Need", resName, "need=", needTotal, "tradingX=", currentTotalX, "delta=", delta, "bought=", bought)
+					if bought > 0 then
+						debugPrint("[Resupply]", "Need", resName, "need=", needTotal, "tradingX=", currentTotalX, "delta=", delta, "bought=", bought)
+					end
 				end
 			end
 		end
@@ -983,6 +994,63 @@ local function hasConquestCB(myCountryFolder, targetName)
 	return conquest:FindFirstChild(targetName) ~= nil
 end
 
+local function hasNestedChildNamed(root, wantedName)
+	if not root then
+		return false
+	end
+	if root:FindFirstChild(wantedName) then
+		return true
+	end
+	for _, child in ipairs(root:GetChildren()) do
+		if child.Name == wantedName then
+			return true
+		end
+		if #child:GetChildren() > 0 and hasNestedChildNamed(child, wantedName) then
+			return true
+		end
+	end
+	return false
+end
+
+local function isAlliedWith(myCountryFolder, targetName)
+	local dip = myCountryFolder:FindFirstChild("Diplomacy")
+	if not dip then return false end
+	local allies = dip:FindFirstChild("Allies") or dip:FindFirstChild("Alliances") or dip:FindFirstChild("Alliance")
+	return hasNestedChildNamed(allies, targetName)
+end
+
+local function isCountryInWar(countryName)
+	local warsFolder = workspace:FindFirstChild("Wars")
+	if not warsFolder then return false end
+	for _, war in ipairs(warsFolder:GetChildren()) do
+		local attacker = war:FindFirstChild("Attacker")
+		local defender = war:FindFirstChild("Defender")
+		if (attacker and attacker:FindFirstChild(countryName)) or (defender and defender:FindFirstChild(countryName)) then
+			return true
+		end
+	end
+	return false
+end
+
+local function isWarTargetAllowed(myCountry, target, playerSet)
+	if target == myCountry then
+		return false, "self"
+	end
+	if CONFIG.AutoJustifyAIOnly and not isCountryAI(target, playerSet) then
+		return false, "player"
+	end
+	if CONFIG.AutoJustifyRequireCities and not countryHasAtLeastOneCity(target.Name) then
+		return false, "no cities"
+	end
+	if CONFIG.AutoJustifySkipAllies and isAlliedWith(myCountry, target.Name) then
+		return false, "ally"
+	end
+	if CONFIG.AutoJustifySkipWars and isCountryInWar(target.Name) then
+		return false, "war"
+	end
+	return true
+end
+
 local function doAutoJustify()
 	local ok, myCountry = assertStillLeader()
 	if not ok then
@@ -994,11 +1062,11 @@ local function doAutoJustify()
 	local t = now()
 	local attempted = 0
 	local skipped = 0
+	local filtered = 0
 
 	for _, c in ipairs(CountryData:GetChildren()) do
 		local name = c.Name
-		local targetAllowed = c ~= myCountry
-			and ((not CONFIG.AutoJustifyAIOnly) or isCountryAI(c, playerSet))
+		local targetAllowed = isWarTargetAllowed(myCountry, c, playerSet)
 
 		if targetAllowed then
 			if hasConquestCB(myCountry, name) then
@@ -1011,11 +1079,12 @@ local function doAutoJustify()
 				debugPrint("[War]", "Justified on", name)
 			end
 		else
+			filtered = filtered + 1
 			War.Justified[name] = nil
 		end
 	end
 
-	War.LastStatus = "Justify sent: " .. tostring(attempted) .. " | Existing CB: " .. tostring(skipped)
+	War.LastStatus = "Justify sent: " .. tostring(attempted) .. " | Existing CB: " .. tostring(skipped) .. " | Filtered: " .. tostring(filtered)
 end
 
 local function doAutoDeclare()
@@ -1029,7 +1098,7 @@ local function doAutoDeclare()
 
 	for _, c in ipairs(CountryData:GetChildren()) do
 		local name = c.Name
-		if c ~= myCountry and isCountryAI(c, playerSet) then
+		if isWarTargetAllowed(myCountry, c, playerSet) then
 			if not War.Declared[name] and hasConquestCB(myCountry, name) then
 				ManageAlliance:FireServer(name, "WarDeclare", "Conquest")
 				War.Declared[name] = true
@@ -1359,6 +1428,52 @@ local AutoBuild = {
 	LastStatus = "Idle"
 }
 
+local function isFactoryOrResourceBuilding(buildingName)
+	local n = tostring(buildingName):lower()
+	return n:find("factory", 1, true)
+		or n:find("mine", 1, true)
+		or n:find("oil", 1, true)
+		or n:find("steel", 1, true)
+		or n:find("motor", 1, true)
+		or n:find("fertilizer", 1, true)
+		or n:find("electronics", 1, true)
+		or n:find("consumer", 1, true)
+end
+
+local function pushUnique(list, seen, name)
+	if name and not seen[name] then
+		list[#list + 1] = name
+		seen[name] = true
+	end
+end
+
+local function getAutoBuildOrder(selected)
+	if CONFIG.AutoBuildPriority == "Selected Order" then
+		return selected
+	end
+
+	local ordered = {}
+	local seen = {}
+
+	if CONFIG.AutoBuildPriority == "Infrastructure First" then
+		pushUnique(ordered, seen, "Infrastructure")
+	elseif CONFIG.AutoBuildPriority == "Develop First" then
+		pushUnique(ordered, seen, "Develop City")
+	elseif CONFIG.AutoBuildPriority == "Factories First" then
+		for _, name in ipairs(selected) do
+			if isFactoryOrResourceBuilding(name) then
+				pushUnique(ordered, seen, name)
+			end
+		end
+	end
+
+	for _, name in ipairs(selected) do
+		pushUnique(ordered, seen, name)
+	end
+
+	return ordered
+end
+
 local function attemptAutoBuildOnce(BuildAttemptLabel, BuildCityLabel, BuildTierLabel, BuildInfraLabel, BuildFundsLabel, BuildQueueLabel, BuildCitiesCountLabel, BuildCitiesFolderLabel)
 	local ok, myCountry = assertStillLeader()
 	if not ok then
@@ -1412,6 +1527,14 @@ local function attemptAutoBuildOnce(BuildAttemptLabel, BuildCityLabel, BuildTier
 	if BuildFundsLabel then BuildFundsLabel:SetText("Funds: " .. tostring(funds) .. " (" .. tostring(source) .. ")") end
 	if BuildQueueLabel then BuildQueueLabel:SetText("Queue Unit: " .. tostring(qUnit)) end
 
+	if CONFIG.AutoBuildSkipQueued and qUnit ~= nil and tostring(qUnit) ~= "" then
+		if BuildAttemptLabel then
+			BuildAttemptLabel:SetText("Attempt: (queued city skipped)")
+		end
+		return
+	end
+
+	list = getAutoBuildOrder(list)
 	for i = 1, #list do
 		local buildingName = list[i]
 
@@ -1472,7 +1595,7 @@ end
 --============================================================
 local Window = Library:CreateWindow({
 	Title = "RoN Automation",
-	Footer = "Auto Trade (separate) + Automations",
+	Footer = "Trade / War / Build / Resources / Watchers",
 	NotifySide = "Right",
 	Resizable = true,
 	EnableSidebarResize = true
@@ -1481,16 +1604,28 @@ local Window = Library:CreateWindow({
 Library.ToggleKeybind = Enum.KeyCode.RightShift
 
 local Tabs = {
-	Trade = Window:AddTab("Auto Trade", "user"),
-	Automations = Window:AddTab("Automations", "settings"),
-	["UI Settings"] = Window:AddTab("UI Settings", "settings")
+	Trade = Window:AddTab("Trade", "user"),
+	War = Window:AddTab("War", "swords"),
+	Build = Window:AddTab("Build", "hammer"),
+	Resources = Window:AddTab("Resources", "package"),
+	Watchers = Window:AddTab("Watchers", "bell"),
+	Settings = Window:AddTab("Settings", "settings")
 }
 
 local TradeLeft = Tabs.Trade:AddLeftGroupbox("Trading")
 local TradeRight = Tabs.Trade:AddRightGroupbox("Status")
 
-local AutoLeft = Tabs.Automations:AddLeftGroupbox("Automations")
-local AutoRight = Tabs.Automations:AddRightGroupbox("Status")
+local WarLeft = Tabs.War:AddLeftGroupbox("War Automation")
+local WarRight = Tabs.War:AddRightGroupbox("War Status")
+
+local BuildLeft = Tabs.Build:AddLeftGroupbox("Build Automation")
+local BuildRight = Tabs.Build:AddRightGroupbox("Build Status")
+
+local ResourcesLeft = Tabs.Resources:AddLeftGroupbox("Resource Automation")
+local ResourcesRight = Tabs.Resources:AddRightGroupbox("Resource Status")
+
+local WatchersLeft = Tabs.Watchers:AddLeftGroupbox("Watchers")
+local WatchersRight = Tabs.Watchers:AddRightGroupbox("Watcher Status")
 
 local Toggles = Library.Toggles
 local Options = Library.Options
@@ -1508,25 +1643,27 @@ local TradeValidListLabel = TradeRight:AddLabel("Valid list: (none)")
 local TradeFlowSafetyLabel = TradeRight:AddLabel("Flow Safety: ON")
 
 -- Automations status labels
-local AutoBuildStatusLabel = AutoRight:AddLabel("Auto Build: Idle")
-local AutoResupplyStatusLabel = AutoRight:AddLabel("Auto Resupply: Idle")
-local AutoResupplyDetailsLabel = AutoRight:AddLabel("Resupply Details: (none)")
-local UnitTagsStatusLabel = AutoRight:AddLabel("Unit Tags: Idle")
-local WatcherStatusLabel = AutoRight:AddLabel("Rebel Watch: Idle")
-local JustWatchStatusLabel = AutoRight:AddLabel("Justify Watch: Idle")
-local LeaderWatchStatusLabel = AutoRight:AddLabel("Leader Watch: Idle")
-local WarStatusLabel = AutoRight:AddLabel("Auto Wars: Idle")
-local PromoteStatusLabel = AutoRight:AddLabel("Auto Promote: Idle")
+local WarStatusLabel = WarRight:AddLabel("Auto Wars: Idle")
+local PromoteStatusLabel = WarRight:AddLabel("Auto Promote: Idle")
+
+local AutoResupplyStatusLabel = ResourcesRight:AddLabel("Auto Resupply: Idle")
+local AutoResupplyDetailsLabel = ResourcesRight:AddLabel("Resupply Details: (none)")
+local UnitTagsStatusLabel = ResourcesRight:AddLabel("Unit Tags: Idle")
+
+local WatcherStatusLabel = WatchersRight:AddLabel("Rebel Watch: Idle")
+local JustWatchStatusLabel = WatchersRight:AddLabel("Justify Watch: Idle")
+local LeaderWatchStatusLabel = WatchersRight:AddLabel("Leader Watch: Idle")
 
 -- Build labels (minimal, keep in automations status)
-local BuildCitiesFolderLabel = AutoRight:AddLabel("Cities Folder: ?")
-local BuildCitiesCountLabel = AutoRight:AddLabel("Cities Found: 0")
-local BuildCityLabel = AutoRight:AddLabel("City: ?")
-local BuildTierLabel = AutoRight:AddLabel("Tier: ?")
-local BuildInfraLabel = AutoRight:AddLabel("Infrastructure: ?")
-local BuildFundsLabel = AutoRight:AddLabel("Funds: ?")
-local BuildQueueLabel = AutoRight:AddLabel("Queue Unit: ?")
-local BuildAttemptLabel = AutoRight:AddLabel("Build Attempt: (none)")
+local AutoBuildStatusLabel = BuildRight:AddLabel("Auto Build: Idle")
+local BuildCitiesFolderLabel = BuildRight:AddLabel("Cities Folder: ?")
+local BuildCitiesCountLabel = BuildRight:AddLabel("Cities Found: 0")
+local BuildCityLabel = BuildRight:AddLabel("City: ?")
+local BuildTierLabel = BuildRight:AddLabel("Tier: ?")
+local BuildInfraLabel = BuildRight:AddLabel("Infrastructure: ?")
+local BuildFundsLabel = BuildRight:AddLabel("Funds: ?")
+local BuildQueueLabel = BuildRight:AddLabel("Queue Unit: ?")
+local BuildAttemptLabel = BuildRight:AddLabel("Build Attempt: (none)")
 
 -- Trade UI helper
 local function setTradeValidList(names)
@@ -1635,7 +1772,7 @@ end)
 --============================================================
 -- Automations controls (NO one-time buttons)
 --============================================================
-AutoLeft:AddToggle("AutoBuildEnabled", {
+BuildLeft:AddToggle("AutoBuildEnabled", {
 	Text = "Auto Build",
 	Default = false
 }):OnChanged(function()
@@ -1643,7 +1780,22 @@ AutoLeft:AddToggle("AutoBuildEnabled", {
 	AutoBuildStatusLabel:SetText("Auto Build: " .. (CONFIG.AutoBuildEnabled and "Running" or "Idle"))
 end)
 
-AutoLeft:AddDropdown("AutoBuildBuildings", {
+BuildLeft:AddDropdown("AutoBuildPriority", {
+	Text = "Priority Mode",
+	Values = { "Selected Order", "Infrastructure First", "Develop First", "Factories First" },
+	Default = CONFIG.AutoBuildPriority
+}):OnChanged(function()
+	CONFIG.AutoBuildPriority = Options.AutoBuildPriority.Value
+end)
+
+BuildLeft:AddToggle("AutoBuildSkipQueued", {
+	Text = "Skip Queued Cities",
+	Default = true
+}):OnChanged(function()
+	CONFIG.AutoBuildSkipQueued = Toggles.AutoBuildSkipQueued.Value
+end)
+
+BuildLeft:AddDropdown("AutoBuildBuildings", {
 	Text = "Buildings (Multi-select)",
 	Values = (function()
 		local list = {}
@@ -1673,7 +1825,7 @@ AutoLeft:AddDropdown("AutoBuildBuildings", {
 	CONFIG.AutoBuildSelected = ordered
 end)
 
-AutoLeft:AddToggle("AutoResupplyEnabled", {
+ResourcesLeft:AddToggle("AutoResupplyEnabled", {
 	Text = "Auto Resupply (AI only)",
 	Default = false
 }):OnChanged(function()
@@ -1681,7 +1833,24 @@ AutoLeft:AddToggle("AutoResupplyEnabled", {
 	AutoResupplyStatusLabel:SetText("Auto Resupply: " .. (CONFIG.AutoResupplyEnabled and "Running" or "Idle"))
 end)
 
-AutoLeft:AddToggle("UnitTagsEnabled", {
+ResourcesLeft:AddToggle("AutoResupplyOnlyNegativeFlow", {
+	Text = "Only Negative Flow",
+	Default = true
+}):OnChanged(function()
+	CONFIG.AutoResupplyOnlyNegativeFlow = Toggles.AutoResupplyOnlyNegativeFlow.Value
+end)
+
+ResourcesLeft:AddSlider("ResupplyMaxTrades", {
+	Text = "Max Trades Per Scan",
+	Default = Resupply.MaxTradesPerScan,
+	Min = 1,
+	Max = 20,
+	Rounding = 0
+}):OnChanged(function(v)
+	Resupply.MaxTradesPerScan = v
+end)
+
+ResourcesLeft:AddToggle("UnitTagsEnabled", {
 	Text = "Unit Tags (force on)",
 	Default = false
 }):OnChanged(function()
@@ -1689,7 +1858,7 @@ AutoLeft:AddToggle("UnitTagsEnabled", {
 	UnitTagsStatusLabel:SetText("Unit Tags: " .. (CONFIG.UnitTagsEnabled and "Running" or "Idle"))
 end)
 
-AutoLeft:AddToggle("WatcherEnabled", {
+WatchersLeft:AddToggle("WatcherEnabled", {
 	Text = "Rebel Watch (constant)",
 	Default = false
 }):OnChanged(function()
@@ -1697,7 +1866,7 @@ AutoLeft:AddToggle("WatcherEnabled", {
 	WatcherStatusLabel:SetText("Rebel Watch: " .. (CONFIG.WatcherEnabled and "Running" or "Idle"))
 end)
 
-AutoLeft:AddToggle("JustifyWatchEnabled", {
+WatchersLeft:AddToggle("JustifyWatchEnabled", {
 	Text = "Justification Watch (constant)",
 	Default = false
 }):OnChanged(function()
@@ -1705,7 +1874,7 @@ AutoLeft:AddToggle("JustifyWatchEnabled", {
 	JustWatchStatusLabel:SetText("Justify Watch: " .. (CONFIG.JustifyWatchEnabled and "Running" or "Idle"))
 end)
 
-AutoLeft:AddToggle("LeaderWatchEnabled", {
+WatchersLeft:AddToggle("LeaderWatchEnabled", {
 	Text = "Leader Watch (corrupt)",
 	Default = false
 }):OnChanged(function()
@@ -1713,21 +1882,42 @@ AutoLeft:AddToggle("LeaderWatchEnabled", {
 	LeaderWatchStatusLabel:SetText("Leader Watch: " .. (CONFIG.LeaderWatchEnabled and "Running" or "Idle"))
 end)
 
-AutoLeft:AddToggle("AutoJustifyEnabled", {
+WarLeft:AddToggle("AutoJustifyEnabled", {
 	Text = "Auto Justify",
 	Default = false
 }):OnChanged(function()
 	CONFIG.AutoJustifyEnabled = Toggles.AutoJustifyEnabled.Value
 end)
 
-AutoLeft:AddToggle("AutoJustifyAIOnly", {
+WarLeft:AddToggle("AutoJustifyAIOnly", {
 	Text = "Auto Justify AI Only",
 	Default = true
 }):OnChanged(function()
 	CONFIG.AutoJustifyAIOnly = Toggles.AutoJustifyAIOnly.Value
 end)
 
-AutoLeft:AddSlider("AutoJustifyRetry", {
+WarLeft:AddToggle("AutoJustifySkipAllies", {
+	Text = "Skip Allies",
+	Default = true
+}):OnChanged(function()
+	CONFIG.AutoJustifySkipAllies = Toggles.AutoJustifySkipAllies.Value
+end)
+
+WarLeft:AddToggle("AutoJustifySkipWars", {
+	Text = "Skip Countries At War",
+	Default = true
+}):OnChanged(function()
+	CONFIG.AutoJustifySkipWars = Toggles.AutoJustifySkipWars.Value
+end)
+
+WarLeft:AddToggle("AutoJustifyRequireCities", {
+	Text = "Require Cities",
+	Default = true
+}):OnChanged(function()
+	CONFIG.AutoJustifyRequireCities = Toggles.AutoJustifyRequireCities.Value
+end)
+
+WarLeft:AddSlider("AutoJustifyRetry", {
 	Text = "Justify Retry Delay",
 	Default = CONFIG.AutoJustifyRetrySeconds,
 	Min = 10,
@@ -1738,21 +1928,21 @@ AutoLeft:AddSlider("AutoJustifyRetry", {
 	CONFIG.AutoJustifyRetrySeconds = v
 end)
 
-AutoLeft:AddToggle("AutoDeclareEnabled", {
+WarLeft:AddToggle("AutoDeclareEnabled", {
 	Text = "Auto Declare (AI only)",
 	Default = false
 }):OnChanged(function()
 	CONFIG.AutoDeclareEnabled = Toggles.AutoDeclareEnabled.Value
 end)
 
-AutoLeft:AddToggle("AutoPeaceEnabled", {
+WarLeft:AddToggle("AutoPeaceEnabled", {
 	Text = "Auto Peace (constant)",
 	Default = false
 }):OnChanged(function()
 	CONFIG.AutoPeaceEnabled = Toggles.AutoPeaceEnabled.Value
 end)
 
-AutoLeft:AddToggle("AutoPromoteEnabled", {
+WarLeft:AddToggle("AutoPromoteEnabled", {
 	Text = "Auto Promote Corrupt Leaders",
 	Default = false
 }):OnChanged(function()
@@ -1760,7 +1950,7 @@ AutoLeft:AddToggle("AutoPromoteEnabled", {
 	PromoteStatusLabel:SetText("Auto Promote: " .. (CONFIG.AutoPromoteEnabled and "Running" or "Idle"))
 end)
 
-AutoLeft:AddToggle("NotificationsEnabled", {
+WatchersLeft:AddToggle("NotificationsEnabled", {
 	Text = "Notifications",
 	Default = true
 }):OnChanged(function()
@@ -1777,8 +1967,8 @@ ThemeManager:SetFolder("RoN_Auto_All")
 SaveManager:SetFolder("RoN_Auto_All")
 
 SaveManager:IgnoreThemeSettings()
-ThemeManager:ApplyToTab(Tabs["UI Settings"])
-SaveManager:BuildConfigSection(Tabs["UI Settings"])
+ThemeManager:ApplyToTab(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
 ThemeManager:LoadDefault()
 SaveManager:LoadAutoloadConfig()
 
