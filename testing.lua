@@ -36,15 +36,33 @@ end
 
 local country = getCountry()
 if not country then return end
+
+local function getCountryFolder()
+    local folder = workspaceData:FindFirstChild(country)
+    if folder then
+        return folder
+    end
+
+    country = getCountry()
+    return country and workspaceData:FindFirstChild(country)
+end
+
 -- Get political power value
 local function getPower()
-    local political = workspaceData[country]:FindFirstChild("Power") and workspaceData[country].Power:FindFirstChild("Political")
+    local countryFolder = getCountryFolder()
+    if not countryFolder then return 0 end
+
+    local power = countryFolder:FindFirstChild("Power")
+    local political = power and power:FindFirstChild("Political")
     return (political and typeof(political.Value) == "number") and political.Value or 0
 end
+
 -- get current policies
 local function getActivePolicies()
     local active = {}
-    local policyFolder = workspaceData[country]:FindFirstChild("Laws") and workspaceData[country].Laws:FindFirstChild("Policies")
+    local countryFolder = getCountryFolder()
+    local laws = countryFolder and countryFolder:FindFirstChild("Laws")
+    local policyFolder = laws and laws:FindFirstChild("Policies")
     if policyFolder then
         for _, p in ipairs(policyFolder:GetChildren()) do
             active[p.Name] = true
@@ -66,9 +84,19 @@ end
 local Toggles = {}
 local sortedPolicies = policiesFolder:GetChildren()
 table.sort(sortedPolicies, function(a, b) return a.Name < b.Name end)
+local policyInfo = {}
 
 for _, policy in ipairs(sortedPolicies) do
     local key = sanitize(policy.Name)
+    local costObj = policy:FindFirstChild("PPCost")
+    local cost = (costObj and costObj:IsA("Vector3Value")) and costObj.Value.X or 0
+
+    policyInfo[#policyInfo + 1] = {
+        name = policy.Name,
+        key = key,
+        cost = cost,
+    }
+
     Toggles[key] = Groupbox:AddToggle("Toggle_" .. key, {
         Text = policy.Name,
         Default = false,
@@ -92,11 +120,10 @@ local function processPolicies()
     local active = getActivePolicies()
     local power = getPower()
 
-    for _, policy in ipairs(sortedPolicies) do
-        local name = policy.Name
-        local toggle = Toggles[sanitize(name)]
-        local costObj = policy:FindFirstChild("PPCost")
-        local cost = (costObj and costObj:IsA("Vector3Value")) and costObj.Value.X or 0
+    for _, policy in ipairs(policyInfo) do
+        local name = policy.name
+        local toggle = Toggles[policy.key]
+        local cost = policy.cost
 
         if toggle and toggle.Value and not active[name] and not recentlyEnacted[name] and power >= cost then
             enactPolicy(name)

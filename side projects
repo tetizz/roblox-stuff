@@ -17,6 +17,12 @@ local GuiService = game:GetService("GuiService")
 local TeleportService = game:GetService("TeleportService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local plr = Players.LocalPlayer
+local RemoteEvents
+
+local function getRemoteEvents()
+    RemoteEvents = RemoteEvents or ReplicatedStorage:WaitForChild("RemoteEvents")
+    return RemoteEvents
+end
 
 local function checkWhitelist()
     for _, player in ipairs(Players:GetPlayers()) do
@@ -197,14 +203,15 @@ local function validBtn(inst, mana, rebirths)
     return getBtnPos(inst) ~= nil
 end
 
-local function gatherCands(root)
-    local res = {}
+local function findFirstValidBtn(root)
     local mana = getMana()
     local rebirths = getRebirths()
+
     for _, inst in ipairs(root:GetDescendants()) do
-        if validBtn(inst, mana, rebirths) then table.insert(res, inst) end
+        if validBtn(inst, mana, rebirths) then
+            return inst
+        end
     end
-    return res
 end
 
 local char, hrp
@@ -265,7 +272,7 @@ local function skipWeatherEvent()
         local timer = evObj:FindFirstChild("Timer")
         local eventName = evObj:FindFirstChild("EventDisplayName")
         if timer and timer.Value > 0 then
-            local remote = ReplicatedStorage:WaitForChild("RemoteEvents"):FindFirstChild("SkipEvent")
+            local remote = getRemoteEvents():FindFirstChild("SkipEvent")
             if remote then
                 remote:FireServer()
                 Library:Notify({
@@ -311,8 +318,8 @@ end
 
 local function doRebirth()
     rebirthing = true
-    local repEv = ReplicatedStorage:WaitForChild("RemoteEvents")
-    repEv.RebirthCallback:InvokeServer(plr)
+    local remoteEvents = getRemoteEvents()
+    remoteEvents.RebirthCallback:InvokeServer(plr)
     task.wait(2)
     local masteryFolder = plr:WaitForChild("PlayerData"):FindFirstChild("Mastery")
     if masteryFolder then
@@ -335,15 +342,15 @@ local function doRebirth()
                 Description = string.format("Chose element '%s' (Mastery: %d)", chosen, lowestValue),
                 Time = 3
             })
-            repEv.ElementCallback:InvokeServer(chosen)
-            repEv.PickCallback:InvokeServer()
+            remoteEvents.ElementCallback:InvokeServer(chosen)
+            remoteEvents.PickCallback:InvokeServer()
         else
             Library:Notify({
                 Title = "Auto Rebirth",
                 Description = "No mastery elements ≥ 0 found!",
                 Time = 3
             })
-            repEv.PickCallback:InvokeServer()
+            remoteEvents.PickCallback:InvokeServer()
         end
     else
         Library:Notify({
@@ -351,7 +358,7 @@ local function doRebirth()
             Description = "Mastery folder not found!",
             Time = 3
         })
-        repEv.PickCallback:InvokeServer()
+        remoteEvents.PickCallback:InvokeServer()
     end
     if collectResizerOn then resizeMyCollectZone() end
     rebirthing = false
@@ -424,8 +431,8 @@ task.spawn(function()
                 and Workspace.Map:FindFirstChild("Tycoons")
                 and Workspace.Map.Tycoons:FindFirstChild(plr.Name)
             if myTycoon then
-                local cands = gatherCands(myTycoon)
-                if #cands > 0 then bringBtnAndTrigger(cands[1]) end
+                local button = findFirstValidBtn(myTycoon)
+                if button then bringBtnAndTrigger(button) end
             end
             busy = false
         end

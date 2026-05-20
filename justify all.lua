@@ -7,6 +7,7 @@ local JustifyWar = workspace:WaitForChild("GameManager"):WaitForChild("JustifyWa
 local LocalPlayer = Players.LocalPlayer
 local JUSTIFY_DELAY = 1
 local RESCAN_DELAY = 5
+local REQUEST_RETRY_DELAY = 60
 
 local requested = {}
 
@@ -41,6 +42,7 @@ end
 while true do
     local myCountry = getMyCountry()
     local currentCountries = {}
+    local retryReadyAt = os.clock()
 
     for _, country in ipairs(CountryData:GetChildren()) do
         local countryName = country.Name
@@ -51,8 +53,8 @@ while true do
 
         if shouldSkipOwnCountry or alreadyHasCB then
             requested[countryName] = nil
-        elseif not requested[countryName] then
-            requested[countryName] = true
+        elseif not requested[countryName] or requested[countryName] <= retryReadyAt then
+            requested[countryName] = retryReadyAt + REQUEST_RETRY_DELAY
             pcall(function()
                 JustifyWar:FireServer(countryName, "Conquest")
             end)
