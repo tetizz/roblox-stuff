@@ -14,7 +14,6 @@ local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))
 --============================================================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local workspace = game:GetService("Workspace")
 local CoreGui = game:GetService("CoreGui")
 local StarterGui = game:GetService("StarterGui")
@@ -69,6 +68,8 @@ local CONFIG = {
 	WatcherEnabled = false, -- rebel funding watcher
 	JustifyWatchEnabled = false, -- justification progress watcher
 	AutoJustifyEnabled = false,
+	AutoJustifyAIOnly = true,
+	AutoJustifyRetrySeconds = 60,
 	AutoDeclareEnabled = false,
 	AutoPeaceEnabled = false,
 
@@ -442,7 +443,7 @@ local function getTradeIncomeFallback(myCountry)
 	return tradeExport.Value
 end
 
--- Cooldowns for trade rejections
+-- Cooldowns for retrying trade attempts
 local TradeCooldowns = {}
 local PendingAttempts = {}
 
@@ -543,11 +544,11 @@ local function fireCreateBuilding(city, buildingName)
 end
 
 --============================================================
--- Auto Resupply (AI-only, no spam, rejection-aware, runs alongside autotrade)
+-- Auto Resupply (AI-only, no spam, cooldown-aware, runs alongside autotrade)
 --============================================================
 local Resupply = {
-	-- Per supplier/resource rejection cooldowns
-	Reject = {}, -- key = supplier|resource -> time
+	-- Per supplier/resource retry cooldowns
+	Paused = {}, -- key = supplier|resource -> time
 	CheckDelay = 1.25,
 	CooldownSeconds = 30,
 	IntervalSeconds = 0.5,
@@ -560,13 +561,13 @@ end
 
 local function isResupplySupplierOnCooldown(supplier, resource)
 	local k = resKey(supplier, resource)
-	local t = Resupply.Reject[k]
+	local t = Resupply.Paused[k]
 	return t and t > now()
 end
 
 local function setResupplySupplierCooldown(supplier, resource)
 	local k = resKey(supplier, resource)
-	Resupply.Reject[k] = now() + Resupply.CooldownSeconds
+	Resupply.Paused[k] = now() + Resupply.CooldownSeconds
 end
 
 local function parseOperationalReason(reason)
@@ -711,7 +712,7 @@ local function attemptResupplyResource(myCountry, resourceName, delta, playerSet
 		sendBuy(supplierName, resourceName, amt)
 		tradesSent = tradesSent + 1
 
-		-- Rejection-aware: after delay, if trade entry not present -> cooldown that supplier for this resource
+		-- After a delay, if trade entry is not present, pause that supplier/resource briefly.
 		task.delay(Resupply.CheckDelay, function()
 			local ok2, myCountry2 = assertStillLeader()
 			if not ok2 then return end
@@ -984,19 +985,31 @@ local function doAutoJustify()
 	end
 
 	local playerSet = buildPlayerIdentitySet()
+	local t = now()
+	local attempted = 0
+	local skipped = 0
 
 	for _, c in ipairs(CountryData:GetChildren()) do
 		local name = c.Name
-		if c ~= myCountry and isCountryAI(c, playerSet) then
-			if not War.Justified[name] and not hasConquestCB(myCountry, name) then
+		local targetAllowed = c ~= myCountry
+			and ((not CONFIG.AutoJustifyAIOnly) or isCountryAI(c, playerSet))
+
+		if targetAllowed then
+			if hasConquestCB(myCountry, name) then
+				War.Justified[name] = nil
+				skipped = skipped + 1
+			elseif (not War.Justified[name]) or War.Justified[name] <= t then
 				JustifyWar:FireServer(name, "Conquest")
-				War.Justified[name] = true
+				War.Justified[name] = t + CONFIG.AutoJustifyRetrySeconds
+				attempted = attempted + 1
 				debugPrint("[War]", "Justified on", name)
 			end
+		else
+			War.Justified[name] = nil
 		end
 	end
 
-	War.LastStatus = "AutoJustify running"
+	War.LastStatus = "Justify sent: " .. tostring(attempted) .. " | Existing CB: " .. tostring(skipped)
 end
 
 local function doAutoDeclare()
@@ -1554,7 +1567,7 @@ TradeLeft:AddSlider("TradeDelay", {
 end)
 
 TradeLeft:AddSlider("TradeCooldown", {
-	Text = "Reject Cooldown",
+	Text = "Trade Retry Delay",
 	Default = 120,
 	Min = 10,
 	Max = 600,
@@ -1618,7 +1631,7 @@ AutoLeft:AddDropdown("AutoBuildBuildings", {
 end)
 
 AutoLeft:AddToggle("AutoResupplyEnabled", {
-	Text = "Auto Resupply (AI only, rejection-aware)",
+	Text = "Auto Resupply (AI only)",
 	Default = false
 }):OnChanged(function()
 	CONFIG.AutoResupplyEnabled = Toggles.AutoResupplyEnabled.Value
@@ -1650,10 +1663,28 @@ AutoLeft:AddToggle("JustifyWatchEnabled", {
 end)
 
 AutoLeft:AddToggle("AutoJustifyEnabled", {
-	Text = "Auto Justify (AI only)",
+	Text = "Auto Justify",
 	Default = false
 }):OnChanged(function()
 	CONFIG.AutoJustifyEnabled = Toggles.AutoJustifyEnabled.Value
+end)
+
+AutoLeft:AddToggle("AutoJustifyAIOnly", {
+	Text = "Auto Justify AI Only",
+	Default = true
+}):OnChanged(function()
+	CONFIG.AutoJustifyAIOnly = Toggles.AutoJustifyAIOnly.Value
+end)
+
+AutoLeft:AddSlider("AutoJustifyRetry", {
+	Text = "Justify Retry Delay",
+	Default = CONFIG.AutoJustifyRetrySeconds,
+	Min = 10,
+	Max = 300,
+	Rounding = 0,
+	Suffix = "s"
+}):OnChanged(function(v)
+	CONFIG.AutoJustifyRetrySeconds = v
 end)
 
 AutoLeft:AddToggle("AutoDeclareEnabled", {
@@ -1795,7 +1826,7 @@ task.spawn(function()
 			end)
 		end
 
-		-- Auto Resupply (fast but not spam/hog; AI-only; rejection-aware)
+		-- Auto Resupply (fast but not spam/hog; AI-only)
 		if CONFIG.AutoResupplyEnabled then
 			runEvery("auto_resupply", Resupply.IntervalSeconds, function()
 				AutoResupplyStatusLabel:SetText("Auto Resupply: Running")
