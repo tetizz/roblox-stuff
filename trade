@@ -120,7 +120,29 @@ end
 --============================================================
 -- Leader detection (robust) + AI detection
 --============================================================
+local PlayerIdentityCache = {
+	Dirty = true,
+	Set = {}
+}
+
+local CountryCache = {
+	CheckedAt = 0,
+	Folder = nil
+}
+
+local function markPlayerIdentityDirty()
+	PlayerIdentityCache.Dirty = true
+end
+
+Players.PlayerAdded:Connect(markPlayerIdentityDirty)
+Players.PlayerRemoving:Connect(markPlayerIdentityDirty)
+
 local function getMyCountryFolder()
+	local t = now()
+	if CountryCache.Folder and CountryCache.Folder.Parent and (t - CountryCache.CheckedAt) < 0.5 then
+		return CountryCache.Folder
+	end
+
 	local name = LocalPlayer.Name
 	local display = LocalPlayer.DisplayName
 	local userId = tostring(LocalPlayer.UserId)
@@ -130,10 +152,15 @@ local function getMyCountryFolder()
 		if leader then
 			local v = tostring(leader.Value)
 			if v == name or v == display or v == userId then
+				CountryCache.CheckedAt = t
+				CountryCache.Folder = country
 				return country
 			end
 		end
 	end
+
+	CountryCache.CheckedAt = t
+	CountryCache.Folder = nil
 end
 
 local function assertStillLeader()
@@ -145,12 +172,18 @@ local function assertStillLeader()
 end
 
 local function buildPlayerIdentitySet()
+	if not PlayerIdentityCache.Dirty then
+		return PlayerIdentityCache.Set
+	end
+
 	local set = {}
 	for _, p in ipairs(Players:GetPlayers()) do
 		set[p.Name] = true
 		set[p.DisplayName] = true
 		set[tostring(p.UserId)] = true
 	end
+	PlayerIdentityCache.Set = set
+	PlayerIdentityCache.Dirty = false
 	return set
 end
 
@@ -805,6 +838,8 @@ end
 --============================================================
 local JustWatch = {
 	NotifiedDone = {}, -- key = myCountry|target
+	NotifiedStarted = {}, -- [countryName][target] = true
+	NotifiedThreats = {}, -- [countryName] = true when targeting you
 	LastStatus = "Idle"
 }
 
@@ -832,35 +867,74 @@ local function doJustificationWatch()
 	end
 
 	local actions = dip:FindFirstChild("Actions")
-	if not actions then
-		JustWatch.LastStatus = "No actions"
-		return
-	end
 
 	local doneCount = 0
 	local tracking = 0
+	local startedCount = 0
+	local threatCount = 0
 
-	for _, action in ipairs(actions:GetChildren()) do
-		tracking = tracking + 1
-		local remaining = getRemainingFromAction(action)
-		if remaining ~= nil then
-			local rem, x, z = getRemainingFromAction(action)
-			local key = myCountry.Name .. "|" .. action.Name
+	if actions then
+		for _, action in ipairs(actions:GetChildren()) do
+			tracking = tracking + 1
+			local rem = getRemainingFromAction(action)
+			if rem ~= nil then
+				local key = myCountry.Name .. "|" .. action.Name
 
-			if rem <= 0 then
-				doneCount = doneCount + 1
-				if not JustWatch.NotifiedDone[key] then
-					JustWatch.NotifiedDone[key] = true
-					safeNotify("Justification Done", "Completed on: " .. action.Name, 4)
+				if rem <= 0 then
+					doneCount = doneCount + 1
+					if not JustWatch.NotifiedDone[key] then
+						JustWatch.NotifiedDone[key] = true
+						safeNotify("Justification Done", "Completed on: " .. action.Name, 4)
+					end
+				else
+					-- If it becomes active again later, allow re-notify on completion
+					JustWatch.NotifiedDone[key] = nil
 				end
-			else
-				-- If it becomes active again later, allow re-notify on completion
-				JustWatch.NotifiedDone[key] = nil
 			end
 		end
 	end
 
-	JustWatch.LastStatus = "Tracking: " .. tostring(tracking) .. " | Done: " .. tostring(doneCount)
+	for _, country in ipairs(CountryData:GetChildren()) do
+		local countryName = country.Name
+		local countryDip = country:FindFirstChild("Diplomacy")
+		local countryActions = countryDip and countryDip:FindFirstChild("Actions")
+
+		JustWatch.NotifiedStarted[countryName] = JustWatch.NotifiedStarted[countryName] or {}
+
+		if countryActions then
+			local currentTargets = {}
+			for _, action in ipairs(countryActions:GetChildren()) do
+				local targetName = action.Name
+				currentTargets[targetName] = true
+
+				if country ~= myCountry and not JustWatch.NotifiedStarted[countryName][targetName] then
+					JustWatch.NotifiedStarted[countryName][targetName] = true
+					startedCount = startedCount + 1
+					safeNotify("Justification Started", countryName .. " started justifying on " .. targetName, 4)
+				end
+
+				if country ~= myCountry and targetName == myCountry.Name and not JustWatch.NotifiedThreats[countryName] then
+					JustWatch.NotifiedThreats[countryName] = true
+					threatCount = threatCount + 1
+					safeNotify("Justification Alert", countryName .. " is justifying on your country", 5)
+				end
+			end
+
+			for oldTarget in pairs(JustWatch.NotifiedStarted[countryName]) do
+				if not currentTargets[oldTarget] then
+					JustWatch.NotifiedStarted[countryName][oldTarget] = nil
+					if oldTarget == myCountry.Name then
+						JustWatch.NotifiedThreats[countryName] = nil
+					end
+				end
+			end
+		else
+			JustWatch.NotifiedStarted[countryName] = {}
+			JustWatch.NotifiedThreats[countryName] = nil
+		end
+	end
+
+	JustWatch.LastStatus = "Mine: " .. tostring(tracking) .. " | Done: " .. tostring(doneCount) .. " | New: " .. tostring(startedCount) .. " | Threats: " .. tostring(threatCount)
 end
 
 --============================================================
@@ -1613,7 +1687,7 @@ SaveManager:LoadAutoloadConfig()
 task.spawn(function()
 	while true do
 		-- Common status refresh for trade
-		runEvery("ui_trade_status", 0.25, function()
+		runEvery("ui_trade_status", 0.5, function()
 			local ok, myCountry = assertStillLeader()
 			if ok then
 				TradeCountryLabel:SetText("Country: " .. myCountry.Name)
@@ -1644,14 +1718,14 @@ task.spawn(function()
 
 		-- Unit Tags (force each frame? no, keep it light but constant)
 		if CONFIG.UnitTagsEnabled then
-			runEvery("unit_tags", 0.08, function()
+			runEvery("unit_tags", 0.25, function()
 				ForceTags()
 			end)
 		end
 
 		-- Rebel watch constant (no user timer setting; internal throttle)
 		if CONFIG.WatcherEnabled then
-			runEvery("rebel_watch", 0.12, function()
+			runEvery("rebel_watch", 1.0, function()
 				doRebelWatch()
 				WatcherStatusLabel:SetText("Rebel Watch: " .. Watcher.LastStatus)
 			end)
@@ -1659,7 +1733,7 @@ task.spawn(function()
 
 		-- Justification watch constant
 		if CONFIG.JustifyWatchEnabled then
-			runEvery("justify_watch", 0.12, function()
+			runEvery("justify_watch", 0.75, function()
 				doJustificationWatch()
 				JustWatchStatusLabel:SetText("Justify Watch: " .. JustWatch.LastStatus)
 			end)
@@ -1721,13 +1795,13 @@ task.spawn(function()
 
 		-- Auto Promote
 		if CONFIG.AutoPromoteEnabled then
-			runEvery("auto_promote", 0.15, function()
+			runEvery("auto_promote", 1.0, function()
 				doAutoPromote()
 				PromoteStatusLabel:SetText("Auto Promote: " .. Promote.LastStatus)
 			end)
 		end
 
-		task.wait(0.03)
+		task.wait(0.05)
 	end
 end)
 

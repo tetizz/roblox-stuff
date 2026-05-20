@@ -65,7 +65,7 @@ antiAFK(true)
 local function rejoin()
     if #Players:GetPlayers() <= 1 then
         plr:Kick("\nRejoining...")
-        wait()
+        task.wait()
         TeleportService:Teleport(game.PlaceId, plr)
     else
         TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, plr)
@@ -187,20 +187,22 @@ local function getBtnPos(inst)
     return m.PrimaryPart and m.PrimaryPart.Position or m:GetPivot().Position
 end
 
-local function validBtn(inst)
+local function validBtn(inst, mana, rebirths)
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
     if not (m and m:FindFirstChild("Button_Indicator", true)) then return false end
     local rebirthReq = m:GetAttribute("RebirthReq")
     if type(rebirthReq) ~= "number" then return false end
-    if rebirthReq > getRebirths() then return false end
-    if getMana() < (inst:GetAttribute("UnlockCost") or math.huge) then return false end
+    if rebirthReq > rebirths then return false end
+    if mana < (inst:GetAttribute("UnlockCost") or math.huge) then return false end
     return getBtnPos(inst) ~= nil
 end
 
 local function gatherCands(root)
     local res = {}
+    local mana = getMana()
+    local rebirths = getRebirths()
     for _, inst in ipairs(root:GetDescendants()) do
-        if validBtn(inst) then table.insert(res, inst) end
+        if validBtn(inst, mana, rebirths) then table.insert(res, inst) end
     end
     return res
 end
@@ -358,6 +360,8 @@ end
 local rebirthStarted, rebirthStartTime, lastButtonValue, buttonPressCount = false, nil, 0, 0
 local REBIRTH_COOLDOWN_TIME = 5
 local rebirthCooldown = false
+local lastDebrisScan = 0
+local lastWeatherCheck = 0
 
 task.spawn(function()
     while true do
@@ -404,8 +408,15 @@ task.spawn(function()
             end
         end
 
-        teleportDebrisParts()
-        skipWeatherEvent()
+        local now = tick()
+        if now - lastDebrisScan >= 0.5 then
+            lastDebrisScan = now
+            teleportDebrisParts()
+        end
+        if now - lastWeatherCheck >= 5 then
+            lastWeatherCheck = now
+            skipWeatherEvent()
+        end
 
         if running and not busy and not rebirthing then
             busy = true

@@ -1,6 +1,11 @@
 -- Rise of Nations - Auto Justify All
 
+local Players = game:GetService("Players")
+local CountryData = workspace:WaitForChild("CountryData")
 local JustifyWar = workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar")
+local LocalPlayer = Players.LocalPlayer
+
+local JUSTIFY_DELAY = 1
 
 local countries = {
     "Anguilla",
@@ -230,9 +235,44 @@ local countries = {
     "Wallis and Futuna",
 }
 
+local requested = {}
+
+local function getMyCountry()
+    for _, country in ipairs(CountryData:GetChildren()) do
+        local leader = country:FindFirstChild("Leader")
+        if leader and tostring(leader.Value) == LocalPlayer.Name then
+            return country
+        end
+    end
+end
+
+local function hasConquestCB(myCountry, targetName)
+    if not myCountry then
+        return false
+    end
+
+    local diplomacy = myCountry:FindFirstChild("Diplomacy")
+    local casusBelli = diplomacy and diplomacy:FindFirstChild("CasusBelli")
+    local conquest = casusBelli and casusBelli:FindFirstChild("Conquest")
+    return conquest and conquest:FindFirstChild(targetName) ~= nil
+end
+
 while true do
+    local myCountry = getMyCountry()
+
     for _, country in ipairs(countries) do
-        JustifyWar:FireServer(country, "Conquest")
-        task.wait(1)
+        local shouldSkipOwnCountry = myCountry and country == myCountry.Name
+        local alreadyHasCB = hasConquestCB(myCountry, country)
+
+        if shouldSkipOwnCountry or alreadyHasCB then
+            requested[country] = nil
+        elseif not requested[country] then
+            requested[country] = true
+            pcall(function()
+                JustifyWar:FireServer(country, "Conquest")
+            end)
+        end
+
+        task.wait(JUSTIFY_DELAY)
     end
 end

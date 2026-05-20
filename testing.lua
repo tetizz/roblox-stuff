@@ -16,13 +16,13 @@ local player = game.Players.LocalPlayer
 local replicatedStorage = game:GetService("ReplicatedStorage")
 local workspaceData = workspace:FindFirstChild("CountryData")
 local GameManager = workspace:FindFirstChild("GameManager")
-local RunService = game:GetService("RunService")
+local ChangeLaw = GameManager and GameManager:FindFirstChild("ChangeLaw")
 
 local policiesFolder = replicatedStorage:FindFirstChild("Assets") 
     and replicatedStorage.Assets:FindFirstChild("Laws")
     and replicatedStorage.Assets.Laws:FindFirstChild("Policies")
 
-if not (policiesFolder and GameManager and workspaceData) then return end
+if not (policiesFolder and ChangeLaw and workspaceData) then return end
 
 -- Get country
 local function getCountry()
@@ -55,7 +55,7 @@ end
 -- Store the policies
 local recentlyEnacted = {}
 local function enactPolicy(name)
-    GameManager:WaitForChild("ChangeLaw"):FireServer("Policy", name)
+    ChangeLaw:FireServer("Policy", name)
     recentlyEnacted[name] = true
 end
 
@@ -92,7 +92,7 @@ local function processPolicies()
     local active = getActivePolicies()
     local power = getPower()
 
-    for _, policy in ipairs(policiesFolder:GetChildren()) do
+    for _, policy in ipairs(sortedPolicies) do
         local name = policy.Name
         local toggle = Toggles[sanitize(name)]
         local costObj = policy:FindFirstChild("PPCost")
@@ -104,6 +104,9 @@ local function processPolicies()
     end
 end
 
-RunService.Heartbeat:Connect(function()
-    pcall(processPolicies)
+task.spawn(function()
+    while true do
+        pcall(processPolicies)
+        task.wait(1)
+    end
 end)
