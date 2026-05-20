@@ -3,237 +3,10 @@
 local Players = game:GetService("Players")
 local CountryData = workspace:WaitForChild("CountryData")
 local JustifyWar = workspace:WaitForChild("GameManager"):WaitForChild("JustifyWar")
+
 local LocalPlayer = Players.LocalPlayer
-
 local JUSTIFY_DELAY = 1
-
-local countries = {
-    "Anguilla",
-    "Antigua and Barbuda",
-    "Bahamas",
-    "Barbados",
-    "Belize",
-    "Bermuda",
-    "Bonaire",
-    "Cayman Islands",
-    "British Virgin Islands",
-    "Canada",
-    "Costa Rica",
-    "Cuba",
-    "Dominica",
-    "Dominican Republic",
-    "El Salvador",
-    "Greenland",
-    "Grenada",
-    "Guadeloupe",
-    "Guatemala",
-    "Haiti",
-    "Honduras",
-    "Jamaica",
-    "Martinique",
-    "Mexico",
-    "Montserrat",
-    "Nicaragua",
-    "Panama",
-    "Saba",
-    "Saint Barthelemy",
-    "Saint Kitts and Nevis",
-    "Saint Lucia",
-    "Saint Pierre and Miquelon",
-    "Saint Vincent and the Grenadines",
-    "Sint Eustatius",
-    "Sint Maarten",
-    "United States",
-    "United States Virgin Islands",
-    "Albania",
-    "Andorra",
-    "Armenia",
-    "Austria",
-    "Belarus",
-    "Belgium",
-    "Bosnia and Herzegovina",
-    "Bulgaria",
-    "Czech Republic",
-    "Denmark",
-    "Estonia",
-    "Faroe Islands",
-    "Finland",
-    "France",
-    "Germany",
-    "Gibraltar",
-    "Greece",
-    "Guernsey",
-    "Hungary",
-    "Iceland",
-    "Ireland",
-    "Isle of Man",
-    "Italy",
-    "Jersey",
-    "Latvia",
-    "Liechtenstein",
-    "Lithuania",
-    "Luxembourg",
-    "Macedonia",
-    "Malta",
-    "Moldova",
-    "Monaco",
-    "Montenegro",
-    "Netherlands",
-    "Norway",
-    "Portugal",
-    "Romania",
-    "Russia",
-    "San Marino",
-    "Serbia",
-    "Slovakia",
-    "Slovenia",
-    "Spain",
-    "Sweden",
-    "Switzerland",
-    "Turkey",
-    "Ukraine",
-    "United Kingdom",
-    "Argentina",
-    "Aruba",
-    "Bolivia",
-    "Brazil",
-    "Chile",
-    "Colombia",
-    "Curacao",
-    "Ecuador",
-    "Falkland Islands",
-    "French Guiana",
-    "Guyana",
-    "Paraguay",
-    "Peru",
-    "Suriname",
-    "Trinidad and Tobago",
-    "Uruguay",
-    "Venezuela",
-    "Afghanistan",
-    "Azerbaijan",
-    "Bahrain",
-    "Bangladesh",
-    "Bhutan",
-    "Brunei",
-    "Burma",
-    "Cambodia",
-    "China",
-    "Christmas Island",
-    "Cyprus",
-    "Georgia",
-    "Hong Kong",
-    "India",
-    "Indonesia",
-    "Iran",
-    "Iraq",
-    "Israel",
-    "Japan",
-    "Jordan",
-    "Kazakhstan",
-    "Laos",
-    "Lebanon",
-    "Macau",
-    "Malaysia",
-    "Maldives",
-    "Mongolia",
-    "Nepal",
-    "North Korea",
-    "Oman",
-    "Pakistan",
-    "Philippines",
-    "Qatar",
-    "Saudi Arabia",
-    "Singapore",
-    "South Korea",
-    "Sri Lanka",
-    "Syria",
-    "Taiwan",
-    "Tajikistan",
-    "Thailand",
-    "Turkmenistan",
-    "United Arab Emirates",
-    "Uzbekistan",
-    "Vietnam",
-    "Yemen",
-    "Algeria",
-    "Benin",
-    "Botswana",
-    "Burkina Faso",
-    "Burundi",
-    "Cabo Verde",
-    "Cameroon",
-    "Chad",
-    "Comoros",
-    "Cote d'Ivoire",
-    "Democratic Republic of the Congo",
-    "Djibouti",
-    "Egypt",
-    "Eritrea",
-    "Eswatini",
-    "Ethiopia",
-    "Gabon",
-    "Gambia",
-    "Ghana",
-    "Guinea",
-    "Guinea-Bissau",
-    "Kenya",
-    "Lesotho",
-    "Liberia",
-    "Libya",
-    "Madagascar",
-    "Malawi",
-    "Mali",
-    "Mauritania",
-    "Mauritius",
-    "Mayotte",
-    "Mozambique",
-    "Namibia",
-    "Niger",
-    "Nigeria",
-    "Rwanda",
-    "Réunion",
-    "Saint Helena",
-    "Sao Tome and Principe",
-    "Senegal",
-    "Seychelles",
-    "Sierra Leone",
-    "Somalia",
-    "South Africa",
-    "South Sudan",
-    "Sudan",
-    "Tanzania",
-    "Togo",
-    "Tunisia",
-    "Uganda",
-    "Western Sahara",
-    "Zambia",
-    "Zimbabwe",
-    "American Samoa",
-    "Antarctica",
-    "Australia",
-    "Cook Islands",
-    "Fiji",
-    "Guam",
-    "Kiribati",
-    "Micronesia",
-    "Nauru",
-    "New Caledonia",
-    "New Zealand",
-    "Niue",
-    "Norfolk Island",
-    "Northern Mariana Islands",
-    "Palau",
-    "Papua New Guinea",
-    "Rapa Nui",
-    "Samoa",
-    "Solomon Islands",
-    "Tokelau",
-    "Tonga",
-    "Tuvalu",
-    "Vanuatu",
-    "Wallis and Futuna",
-}
+local RESCAN_DELAY = 5
 
 local requested = {}
 
@@ -257,22 +30,37 @@ local function hasConquestCB(myCountry, targetName)
     return conquest and conquest:FindFirstChild(targetName) ~= nil
 end
 
+local function cleanRemovedCountries(currentCountries)
+    for countryName in pairs(requested) do
+        if not currentCountries[countryName] then
+            requested[countryName] = nil
+        end
+    end
+end
+
 while true do
     local myCountry = getMyCountry()
+    local currentCountries = {}
 
-    for _, country in ipairs(countries) do
-        local shouldSkipOwnCountry = myCountry and country == myCountry.Name
-        local alreadyHasCB = hasConquestCB(myCountry, country)
+    for _, country in ipairs(CountryData:GetChildren()) do
+        local countryName = country.Name
+        currentCountries[countryName] = true
+
+        local shouldSkipOwnCountry = myCountry and country == myCountry
+        local alreadyHasCB = hasConquestCB(myCountry, countryName)
 
         if shouldSkipOwnCountry or alreadyHasCB then
-            requested[country] = nil
-        elseif not requested[country] then
-            requested[country] = true
+            requested[countryName] = nil
+        elseif not requested[countryName] then
+            requested[countryName] = true
             pcall(function()
-                JustifyWar:FireServer(country, "Conquest")
+                JustifyWar:FireServer(countryName, "Conquest")
             end)
         end
 
         task.wait(JUSTIFY_DELAY)
     end
+
+    cleanRemovedCountries(currentCountries)
+    task.wait(RESCAN_DELAY)
 end
