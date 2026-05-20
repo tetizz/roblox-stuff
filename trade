@@ -67,6 +67,7 @@ local CONFIG = {
 
 	WatcherEnabled = false, -- rebel funding watcher
 	JustifyWatchEnabled = false, -- justification progress watcher
+	LeaderWatchEnabled = false, -- corrupt leader watcher
 	AutoJustifyEnabled = false,
 	AutoJustifyAIOnly = true,
 	AutoJustifyRetrySeconds = 60,
@@ -699,29 +700,25 @@ local function attemptResupplyResource(myCountry, resourceName, delta, playerSet
 		if tradesSent >= Resupply.MaxTradesPerScan then break end
 
 		local s = suppliers[i]
-		if s.onCd then
-			continue
-		end
+		if not s.onCd then
+			local amt = math.min(remaining, s.flow)
+			if amt > 0 then
+				local supplierName = s.name
+				sendBuy(supplierName, resourceName, amt)
+				tradesSent = tradesSent + 1
 
-		local amt = math.min(remaining, s.flow)
-		if amt <= 0 then
-			continue
-		end
+				-- After a delay, if trade entry is not present, pause that supplier/resource briefly.
+				task.delay(Resupply.CheckDelay, function()
+					local ok2, myCountry2 = assertStillLeader()
+					if not ok2 then return end
+					if not hasTradePartner(myCountry2, resourceName, supplierName) then
+						setResupplySupplierCooldown(supplierName, resourceName)
+					end
+				end)
 
-		local supplierName = s.name
-		sendBuy(supplierName, resourceName, amt)
-		tradesSent = tradesSent + 1
-
-		-- After a delay, if trade entry is not present, pause that supplier/resource briefly.
-		task.delay(Resupply.CheckDelay, function()
-			local ok2, myCountry2 = assertStillLeader()
-			if not ok2 then return end
-			if not hasTradePartner(myCountry2, resourceName, supplierName) then
-				setResupplySupplierCooldown(supplierName, resourceName)
+				remaining = remaining - amt
 			end
-		end)
-
-		remaining = remaining - amt
+		end
 	end
 
 	if statusOut then
@@ -816,7 +813,10 @@ local Watcher = {
 }
 
 local function doRebelWatch()
+	local ok, myCountry = assertStillLeader()
+	local myCountryName = ok and myCountry.Name or nil
 	local hits = 0
+	local ownHits = 0
 
 	for _, country in ipairs(CountryData:GetChildren()) do
 		local countryName = country.Name
@@ -832,7 +832,13 @@ local function doRebelWatch()
 
 				if not Watcher.Notified[countryName][funderName] then
 					hits = hits + 1
-					safeNotify("Rebel Funding", funderName .. " funding rebels in " .. countryName, 4)
+					local isOwnCountry = countryName == myCountryName
+					if isOwnCountry then
+						ownHits = ownHits + 1
+						safeNotify("Rebels Funded In Your Country", funderName .. " is funding rebels in " .. countryName, 5)
+					else
+						safeNotify("Rebel Funding", funderName .. " funding rebels in " .. countryName, 4)
+					end
 					debugPrint("[Watcher]", funderName, "funding", countryName)
 					Watcher.Notified[countryName][funderName] = true
 				end
@@ -848,7 +854,7 @@ local function doRebelWatch()
 		end
 	end
 
-	Watcher.LastStatus = "Hits: " .. tostring(hits)
+	Watcher.LastStatus = "Hits: " .. tostring(hits) .. " | Own: " .. tostring(ownHits)
 	return hits
 end
 
@@ -904,7 +910,7 @@ local function doJustificationWatch()
 					doneCount = doneCount + 1
 					if not JustWatch.NotifiedDone[key] then
 						JustWatch.NotifiedDone[key] = true
-						safeNotify("Justification Done", "Completed on: " .. action.Name, 4)
+						safeNotify("CB Completed", "Conquest CB ready on: " .. action.Name, 4)
 					end
 				else
 					-- If it becomes active again later, allow re-notify on completion
@@ -1127,6 +1133,50 @@ local function getStrongestOpponentX(myCountryFolder)
 		end
 	end
 	return highest
+end
+
+local LeaderWatch = {
+	Notified = {}, -- [leaderName] = true
+	LastStatus = "Idle"
+}
+
+local function doLeaderWatch()
+	local ok, myCountry = assertStillLeader()
+	if not ok then
+		LeaderWatch.LastStatus = "Not leader"
+		return
+	end
+
+	local leaders = myCountry:FindFirstChild("Leaders")
+	local current = leaders and leaders:FindFirstChild("Current")
+	if not current then
+		LeaderWatch.Notified = {}
+		LeaderWatch.LastStatus = "No leaders"
+		return
+	end
+
+	local currentCorrupt = {}
+	local corruptCount = 0
+	for _, leaderObj in ipairs(current:GetChildren()) do
+		if leaderObj:GetAttribute("Corrupt") == true then
+			local leaderName = leaderObj.Name
+			currentCorrupt[leaderName] = true
+			corruptCount = corruptCount + 1
+
+			if not LeaderWatch.Notified[leaderName] then
+				LeaderWatch.Notified[leaderName] = true
+				safeNotify("Corrupt Leader Found", leaderName .. " is corrupt in " .. myCountry.Name, 5)
+			end
+		end
+	end
+
+	for leaderName in pairs(LeaderWatch.Notified) do
+		if not currentCorrupt[leaderName] then
+			LeaderWatch.Notified[leaderName] = nil
+		end
+	end
+
+	LeaderWatch.LastStatus = "Corrupt leaders: " .. tostring(corruptCount)
 end
 
 local function doAutoPromote()
@@ -1380,10 +1430,7 @@ local function attemptAutoBuildOnce(BuildAttemptLabel, BuildCityLabel, BuildTier
 				fireCreateBuilding(city, "Infrastructure")
 				return
 			end
-			continue
-		end
-
-		if buildingName == "Develop City" then
+		elseif buildingName == "Develop City" then
 			if type(tier) ~= "number" or tier < 10 then
 				local okAfford, cost = canAffordBuilding("Develop City")
 				if not okAfford then
@@ -1398,26 +1445,21 @@ local function attemptAutoBuildOnce(BuildAttemptLabel, BuildCityLabel, BuildTier
 				fireCreateBuilding(city, "Develop City")
 				return
 			end
-			continue
-		end
-
-		if cityHasBuilding(city, buildingName) then
-			continue
-		end
-
-		local okAfford, cost = canAffordBuilding(buildingName)
-		if not okAfford then
-			if BuildAttemptLabel then
-				BuildAttemptLabel:SetText("Attempt: (can't afford " .. buildingName .. ") cost=" .. tostring(cost))
+		elseif not cityHasBuilding(city, buildingName) then
+			local okAfford, cost = canAffordBuilding(buildingName)
+			if not okAfford then
+				if BuildAttemptLabel then
+					BuildAttemptLabel:SetText("Attempt: (can't afford " .. buildingName .. ") cost=" .. tostring(cost))
+				end
+				return
 			end
+
+			if BuildAttemptLabel then
+				BuildAttemptLabel:SetText("Attempt: " .. buildingName .. " in " .. city.Name)
+			end
+			fireCreateBuilding(city, buildingName)
 			return
 		end
-
-		if BuildAttemptLabel then
-			BuildAttemptLabel:SetText("Attempt: " .. buildingName .. " in " .. city.Name)
-		end
-		fireCreateBuilding(city, buildingName)
-		return
 	end
 
 	if BuildAttemptLabel then
@@ -1472,6 +1514,7 @@ local AutoResupplyDetailsLabel = AutoRight:AddLabel("Resupply Details: (none)")
 local UnitTagsStatusLabel = AutoRight:AddLabel("Unit Tags: Idle")
 local WatcherStatusLabel = AutoRight:AddLabel("Rebel Watch: Idle")
 local JustWatchStatusLabel = AutoRight:AddLabel("Justify Watch: Idle")
+local LeaderWatchStatusLabel = AutoRight:AddLabel("Leader Watch: Idle")
 local WarStatusLabel = AutoRight:AddLabel("Auto Wars: Idle")
 local PromoteStatusLabel = AutoRight:AddLabel("Auto Promote: Idle")
 
@@ -1662,6 +1705,14 @@ AutoLeft:AddToggle("JustifyWatchEnabled", {
 	JustWatchStatusLabel:SetText("Justify Watch: " .. (CONFIG.JustifyWatchEnabled and "Running" or "Idle"))
 end)
 
+AutoLeft:AddToggle("LeaderWatchEnabled", {
+	Text = "Leader Watch (corrupt)",
+	Default = false
+}):OnChanged(function()
+	CONFIG.LeaderWatchEnabled = Toggles.LeaderWatchEnabled.Value
+	LeaderWatchStatusLabel:SetText("Leader Watch: " .. (CONFIG.LeaderWatchEnabled and "Running" or "Idle"))
+end)
+
 AutoLeft:AddToggle("AutoJustifyEnabled", {
 	Text = "Auto Justify",
 	Default = false
@@ -1786,6 +1837,14 @@ task.spawn(function()
 			runEvery("justify_watch", 0.75, function()
 				doJustificationWatch()
 				JustWatchStatusLabel:SetText("Justify Watch: " .. JustWatch.LastStatus)
+			end)
+		end
+
+		-- Leader watch constant
+		if CONFIG.LeaderWatchEnabled then
+			runEvery("leader_watch", 1.0, function()
+				doLeaderWatch()
+				LeaderWatchStatusLabel:SetText("Leader Watch: " .. LeaderWatch.LastStatus)
 			end)
 		end
 
