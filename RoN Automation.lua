@@ -16,6 +16,42 @@ local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 
+local RuntimeCleanupKey = "RoNNationBrainRuntimeCleanup"
+if _G and type(_G[RuntimeCleanupKey]) == "function" then
+	pcall(_G[RuntimeCleanupKey])
+end
+
+local Runtime = {
+	Alive = true,
+	Connections = {}
+}
+
+local function disconnectRuntimeConnections()
+	for _, conn in ipairs(Runtime.Connections) do
+		if conn and conn.Disconnect then
+			pcall(function()
+				conn:Disconnect()
+			end)
+		end
+	end
+	Runtime.Connections = {}
+end
+
+local function trackRuntimeConnection(conn)
+	Runtime.Connections[#Runtime.Connections + 1] = conn
+	return conn
+end
+
+if _G then
+	_G[RuntimeCleanupKey] = function()
+		Runtime.Alive = false
+		disconnectRuntimeConnections()
+		if type(_G.RoNNationBrainCleanup) == "function" then
+			pcall(_G.RoNNationBrainCleanup)
+		end
+	end
+end
+
 local CountryData = workspace:WaitForChild("CountryData")
 local GameManager = workspace:WaitForChild("GameManager")
 local ManageAlliance = GameManager:WaitForChild("ManageAlliance")
@@ -121,6 +157,10 @@ local Scheduler = {
 }
 
 local function runEvery(key, interval, fn)
+	if not Runtime.Alive then
+		return
+	end
+
 	local t = now()
 	interval = tonumber(interval) or 1
 	local last = Scheduler.Last[key]
@@ -168,8 +208,8 @@ local function markPlayerIdentityDirty()
 	PlayerIdentityCache.Dirty = true
 end
 
-Players.PlayerAdded:Connect(markPlayerIdentityDirty)
-Players.PlayerRemoving:Connect(markPlayerIdentityDirty)
+trackRuntimeConnection(Players.PlayerAdded:Connect(markPlayerIdentityDirty))
+trackRuntimeConnection(Players.PlayerRemoving:Connect(markPlayerIdentityDirty))
 
 local function getMyCountryFolder()
 	local t = now()
@@ -1575,6 +1615,11 @@ local function attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeV
 	debugPrint("[AutoTrade]", "Attempted", pick.units, CONFIG.TradeResource, "to", pick.name, "(net:", pick.net .. ")")
 
 	task.delay(CONFIG.TradeAttemptCheckDelay, function()
+		if not Runtime.Alive then
+			PendingAttempts[pendingKey] = nil
+			return
+		end
+
 		local ok2, myCountry2 = assertStillLeader()
 		if not ok2 then
 			PendingAttempts[pendingKey] = nil
@@ -1941,7 +1986,7 @@ local updateDashboard = BrainUI.updateDashboard
 -- MAIN SCHEDULER LOOP (single loop, everything runs alongside)
 --============================================================
 task.spawn(function()
-	while true do
+	while Runtime.Alive do
 		runEvery("dashboard", 0.75, function()
 			updateDashboard()
 		end)

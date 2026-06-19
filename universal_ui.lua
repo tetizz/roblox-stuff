@@ -4,7 +4,7 @@
 local UniversalUI = {}
 
 UniversalUI.Name = "Universal UI"
-UniversalUI.Version = "2026-06-19.1"
+UniversalUI.Version = "2026-06-19.2"
 
 UniversalUI.Themes = {
 	Default = {
@@ -222,9 +222,24 @@ local function button(parent, value, pos, size, callback, theme)
 	corner(btn, 6)
 	stroke(btn, theme.lineBright, 0.15, 1)
 	if callback then
-		btn.MouseButton1Click:Connect(callback)
+		btn.MouseButton1Click:Connect(function()
+			local ok, err = pcall(callback)
+			if not ok then
+				warn("[UniversalUI] button callback failed:", tostring(err))
+			end
+		end)
 	end
 	return btn
+end
+
+local function runCallback(callback, ...)
+	if not callback then
+		return
+	end
+	local ok, err = pcall(callback, ...)
+	if not ok then
+		warn("[UniversalUI] callback failed:", tostring(err))
+	end
 end
 
 local function disconnectConnections(list)
@@ -607,8 +622,8 @@ function SectionMethods:AddToggle(titleValue, initial, callback)
 		btn.BackgroundColor3 = value and theme.green or Color3.fromRGB(42, 51, 61)
 		btn.Text = value and "ON" or "OFF"
 		btn.TextColor3 = value and theme.dark or theme.muted
-		if fire and callback then
-			callback(value)
+		if fire then
+			runCallback(callback, value)
 		end
 	end
 	function control:Set(nextValue)
@@ -650,8 +665,8 @@ function SectionMethods:AddDropdown(titleValue, values, current, callback)
 		selected = value
 		btn.Text = tostring(value or "")
 		list.Visible = false
-		if fire and callback then
-			callback(value)
+		if fire then
+			runCallback(callback, value)
 		end
 	end
 	for i, optionValue in ipairs(values) do
@@ -694,9 +709,9 @@ function SectionMethods:AddSlider(titleValue, initial, minValue, maxValue, suffi
 	local theme = self.Theme
 	local userInput = game:GetService("UserInputService")
 	local row = self:_row(54, "SliderRow")
-	local value = tonumber(initial) or minValue or 0
 	minValue = tonumber(minValue) or 0
 	maxValue = tonumber(maxValue) or 100
+	local value = tonumber(initial) or minValue
 	if maxValue == minValue then
 		maxValue = minValue + 1
 	end
@@ -728,8 +743,8 @@ function SectionMethods:AddSlider(titleValue, initial, minValue, maxValue, suffi
 		end
 		fill.Size = UDim2.new((value - minValue) / (maxValue - minValue), 0, 1, 0)
 		valueLabel.Text = tostring(value) .. (suffix or "")
-		if fire and callback then
-			callback(value)
+		if fire then
+			runCallback(callback, value)
 		end
 	end
 	local function setFromX(x, fire)
