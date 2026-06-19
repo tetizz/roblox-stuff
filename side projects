@@ -19,6 +19,7 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local plr = Players.LocalPlayer
 local RemoteEvents
 local collectResizerThread
+local Library, Win
 
 local RuntimeCleanupKey = "TycoonAutomationRuntimeCleanup"
 if _G and type(_G[RuntimeCleanupKey]) == "function" then
@@ -53,6 +54,15 @@ if _G then
         if collectResizerThread then
             task.cancel(collectResizerThread)
             collectResizerThread = nil
+        end
+        if Library then
+            pcall(function()
+                if type(Library.Unload) == "function" then
+                    Library:Unload()
+                elseif Win and type(Win.Destroy) == "function" then
+                    Win:Destroy()
+                end
+            end)
         end
     end
 end
@@ -123,11 +133,11 @@ end))
 math.randomseed(tick())
 
 -- Load Obsidian UI
-local Library = loadstring(game:HttpGet(
+Library = loadstring(game:HttpGet(
     "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"
 ))()
 
-local Win = Library:CreateWindow({
+Win = Library:CreateWindow({
     Title = "Auto Tycoon with Smart Rebirth + ETA",
     ToggleKeybind = Enum.KeyCode.RightControl,
     Center = true,
@@ -241,11 +251,40 @@ local function validBtn(inst, mana, rebirths)
     return getBtnPos(inst) ~= nil
 end
 
+local ButtonCache = {
+    Root = nil,
+    List = {},
+    CheckedAt = 0,
+    Interval = 1
+}
+
+local function getButtonCandidates(root)
+    local t = tick()
+    if ButtonCache.Root == root and (t - ButtonCache.CheckedAt) < ButtonCache.Interval then
+        return ButtonCache.List
+    end
+
+    local list = {}
+    for _, inst in ipairs(root:GetDescendants()) do
+        if inst:GetAttribute("UnlockCost") ~= nil then
+            local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
+            if m and m:FindFirstChild("Button_Indicator", true) then
+                list[#list + 1] = inst
+            end
+        end
+    end
+
+    ButtonCache.Root = root
+    ButtonCache.List = list
+    ButtonCache.CheckedAt = t
+    return list
+end
+
 local function findFirstValidBtn(root)
     local mana = getMana()
     local rebirths = getRebirths()
 
-    for _, inst in ipairs(root:GetDescendants()) do
+    for _, inst in ipairs(getButtonCandidates(root)) do
         if validBtn(inst, mana, rebirths) then
             return inst
         end
@@ -453,12 +492,12 @@ task.spawn(function()
                 lastButtonValue = unld.Value
             end
             if rebirthStarted and unld.Value > lastButtonValue then
-                buttonPressCount += (unld.Value - lastButtonValue)
+                buttonPressCount = buttonPressCount + (unld.Value - lastButtonValue)
                 lastButtonValue = unld.Value
             end
             if rebirthStarted and unld.Value == tot.Value and not rebirthCooldown then
                 rebirthCooldown = true
-                rebirthCycleCount += 1
+                rebirthCycleCount = rebirthCycleCount + 1
                 local cycleTime = tick() - (rebirthStartTime or tick())
                 if rebirthCycleCount > 1 then
                     table.insert(rebirthData, {totalTime = cycleTime})
