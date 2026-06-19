@@ -129,6 +129,16 @@ local function runEvery(key, interval, fn)
 	fn()
 end
 
+local function getObjectValue(obj)
+	if not obj then return end
+	local ok, value = pcall(function()
+		return obj.Value
+	end)
+	if ok then
+		return value
+	end
+end
+
 --============================================================
 -- Leader detection (robust) + AI detection
 --============================================================
@@ -162,7 +172,7 @@ local function getMyCountryFolder()
 	for _, country in ipairs(CountryData:GetChildren()) do
 		local leader = country:FindFirstChild("Leader")
 		if leader then
-			local v = tostring(leader.Value)
+			local v = tostring(getObjectValue(leader))
 			if v == name or v == display or v == userId then
 				CountryCache.CheckedAt = t
 				CountryCache.Folder = country
@@ -212,7 +222,7 @@ local function isCountryAI(country, playerSet)
 		return true
 	end
 
-	local s = tostring(leader.Value or "")
+	local s = tostring(getObjectValue(leader) or "")
 	if s:find("AI") then
 		return true
 	end
@@ -294,8 +304,9 @@ local function getNumberAttrOrValueObject(inst, name)
 	end
 
 	local obj = inst:FindFirstChild(name)
-	if obj and obj.Value ~= nil and type(obj.Value) == "number" then
-		return obj.Value
+	local value = getObjectValue(obj)
+	if type(value) == "number" then
+		return value
 	end
 end
 
@@ -337,8 +348,9 @@ local function getCountryResourceFlow(country, resource)
 	local res = resourcesFolder:FindFirstChild(resource)
 	if not res then return end
 	local flow = res:FindFirstChild("Flow")
-	if flow and type(flow.Value) == "number" then
-		return flow.Value
+	local value = getObjectValue(flow)
+	if type(value) == "number" then
+		return value
 	end
 end
 
@@ -363,7 +375,10 @@ end
 local function getUnitSellPrice(resource)
 	local v = Resources:FindFirstChild(resource)
 	if not v then return end
-	return v.Value * 0.8
+	local value = getObjectValue(v)
+	if type(value) == "number" then
+		return value * 0.8
+	end
 end
 
 -- Net income rule: Revenue total − Expenses total
@@ -374,8 +389,9 @@ local function getRevenueTotalValue(country)
 	if not revenue then return end
 
 	local total = revenue:FindFirstChild("Total")
-	if total and type(total.Value) == "number" then
-		return total.Value
+	local totalValue = getObjectValue(total)
+	if type(totalValue) == "number" then
+		return totalValue
 	end
 
 	local a = revenue:GetAttribute("Total")
@@ -391,8 +407,9 @@ local function getExpensesTotalValue(country)
 	if not expenses then return end
 
 	local total = expenses:FindFirstChild("Total")
-	if total and type(total.Value) == "number" then
-		return total.Value
+	local totalValue = getObjectValue(total)
+	if type(totalValue) == "number" then
+		return totalValue
 	end
 
 	local a = expenses:GetAttribute("Total")
@@ -451,7 +468,7 @@ local function getTradeIncomeFallback(myCountry)
 	if not revenue then return end
 	local tradeExport = revenue:FindFirstChild("TradeExport")
 	if not tradeExport then return end
-	return tradeExport.Value
+	return getObjectValue(tradeExport)
 end
 
 -- Cooldowns for retrying trade attempts
@@ -502,14 +519,14 @@ local function getQueueUnitValue(city)
 	if not unitOrder then return end
 	local unit = unitOrder:FindFirstChild("Unit")
 	if not unit then return end
-	return unit.Value
+	return getObjectValue(unit)
 end
 
 local function getBuildingCost(buildingName)
 	local b = BuildingsFolder:FindFirstChild(buildingName)
 	if not b then return end
 	local cost = b:FindFirstChild("Cost")
-	return cost and cost.Value
+	return getObjectValue(cost)
 end
 
 local function getMyFunds()
@@ -522,8 +539,9 @@ local function getMyFunds()
 	if econ then
 		for _, key in ipairs({ "Balance", "Money", "Stockpile" }) do
 			local obj = econ:FindFirstChild(key)
-			if obj and type(obj.Value) == "number" then
-				return obj.Value, key
+			local value = getObjectValue(obj)
+			if type(value) == "number" then
+				return value, key
 			end
 			local attr = econ:GetAttribute(key)
 			if type(attr) == "number" then
@@ -599,8 +617,9 @@ local function isBuildingOperational(buildingInstance)
 		return a
 	end
 	local obj = buildingInstance:FindFirstChild("Operational")
-	if obj and typeof(obj.Value) == "boolean" then
-		return obj.Value
+	local value = getObjectValue(obj)
+	if typeof(value) == "boolean" then
+		return value
 	end
 	return nil
 end
@@ -611,8 +630,9 @@ local function getBuildingOperationalReason(buildingInstance)
 		return a
 	end
 	local obj = buildingInstance:FindFirstChild("Operational_Reason")
-	if obj and typeof(obj.Value) == "string" then
-		return obj.Value
+	local value = getObjectValue(obj)
+	if typeof(value) == "string" then
+		return value
 	end
 end
 
@@ -630,11 +650,12 @@ end
 
 local function getTradeXFromEntry(entry)
 	-- Trade entry often Vector3Value where X = amount
-	if entry:IsA("Vector3Value") and typeof(entry.Value) == "Vector3" then
-		return tonumber(entry.Value.X) or 0
+	local value = getObjectValue(entry)
+	if entry:IsA("Vector3Value") and typeof(value) == "Vector3" then
+		return tonumber(value.X) or 0
 	end
-	if entry.Value ~= nil and type(entry.Value) == "number" then
-		return entry.Value
+	if type(value) == "number" then
+		return value
 	end
 	return 0
 end
@@ -886,9 +907,10 @@ local JustWatch = {
 
 local function getRemainingFromAction(action)
 	-- action is typically Vector3Value: X elapsed, Z completed
-	if action:IsA("Vector3Value") and typeof(action.Value) == "Vector3" then
-		local x = tonumber(action.Value.X) or 0
-		local z = tonumber(action.Value.Z) or 0
+	local value = getObjectValue(action)
+	if action:IsA("Vector3Value") and typeof(value) == "Vector3" then
+		local x = tonumber(value.X) or 0
+		local z = tonumber(value.Z) or 0
 		return z - x, x, z
 	end
 	return nil
@@ -1186,12 +1208,13 @@ local function getPoliticalX(countryFolder)
 	local pol = power:FindFirstChild("Political")
 	if not pol then return end
 
-	if pol:IsA("Vector3Value") and typeof(pol.Value) == "Vector3" then
-		return tonumber(pol.Value.X)
+	local value = getObjectValue(pol)
+	if pol:IsA("Vector3Value") and typeof(value) == "Vector3" then
+		return tonumber(value.X)
 	end
 
-	if pol.Value ~= nil and type(pol.Value) == "number" then
-		return pol.Value
+	if type(value) == "number" then
+		return value
 	end
 end
 
@@ -1321,10 +1344,11 @@ local function getPolicyPower(myCountry)
 	if not political then
 		return 0
 	end
-	if political:IsA("Vector3Value") and typeof(political.Value) == "Vector3" then
-		return tonumber(political.Value.X) or 0
+	local value = getObjectValue(political)
+	if political:IsA("Vector3Value") and typeof(value) == "Vector3" then
+		return tonumber(value.X) or 0
 	end
-	return (typeof(political.Value) == "number" and political.Value) or 0
+	return (typeof(value) == "number" and value) or 0
 end
 
 local function getActivePolicies(myCountry)
@@ -1341,11 +1365,12 @@ end
 
 local function getPolicyCost(policy)
 	local costObj = policy:FindFirstChild("PPCost")
-	if costObj and costObj:IsA("Vector3Value") then
-		return tonumber(costObj.Value.X) or 0
+	local value = getObjectValue(costObj)
+	if costObj and costObj:IsA("Vector3Value") and typeof(value) == "Vector3" then
+		return tonumber(value.X) or 0
 	end
-	if costObj and typeof(costObj.Value) == "number" then
-		return costObj.Value
+	if typeof(value) == "number" then
+		return value
 	end
 	return 0
 end
@@ -1707,30 +1732,121 @@ end
 --============================================================
 -- Nation Brain UI Library
 --============================================================
-local BrainUILibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua"))()
-local BrainUI = BrainUILibrary.new({
-	CONFIG = CONFIG,
-	CoreGui = CoreGui,
-	UserInputService = UserInputService,
-	workspace = workspace,
-	Resources = Resources,
-	BuildingsFolder = BuildingsFolder,
-	CountryData = CountryData,
-	Policy = Policy,
-	assertStillLeader = assertStillLeader,
-	getAllMyCitiesSorted = getAllMyCitiesSorted,
-	getMyFunds = getMyFunds,
-	getPolicyPower = getPolicyPower,
-	getCountryResourceFlow = getCountryResourceFlow,
-	getTradeCount = getTradeCount,
-	getNetIncome = getNetIncome,
-	computeTotalNeedByResource = computeTotalNeedByResource,
-	scanAndResupplyOnce = scanAndResupplyOnce,
-	attemptAutoBuildOnce = attemptAutoBuildOnce,
-	doAutoPolicy = doAutoPolicy,
-	safeNotify = safeNotify,
-	buildPolicyInfo = buildPolicyInfo
-})
+local BrainUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua"
+
+local function makeHeadlessStatus(text)
+	local obj = { Text = text or "" }
+	function obj:SetText(value)
+		self.Text = tostring(value or "")
+	end
+	return obj
+end
+
+local function makeHeadlessBrainUI(reason)
+	local defaults = {
+		DashCountryLabel = "Country: ?",
+		DashFundsLabel = "Funds: ?",
+		DashPoliticalLabel = "Political Power: ?",
+		DashCitiesLabel = "Cities: ?",
+		DashTradeLabel = "Trade: ?",
+		DashFlowLabel = "Flow: ?",
+		DashWarsLabel = "Wars: ?",
+		DashAutoLabel = "Enabled: none",
+		DashWarLabel = "War: idle",
+		DashBuildLabel = "Build: idle",
+		DashResourceLabel = "Resources: idle",
+		DashWatcherLabel = "Watchers: idle",
+		DashPolicyLabel = "Policy: idle",
+		TradeStatusLabel = "Status: Idle",
+		TradeCountryLabel = "Country: ?",
+		TradePartnerLabel = "Partners: ?",
+		TradeFlowLabel = "Flow: ?",
+		TradeIncomeLabel = "Trade Export: ?",
+		TradePercentLabel = "Trade Percent: ?",
+		TradeAttemptingLabel = "Attempting to trade: (none)",
+		TradeValidLabel = "Valid countries: 0",
+		TradeValidListLabel = "Valid list: (none)",
+		TradeFlowSafetyLabel = "Flow Safety: ON",
+		WarStatusLabel = "Auto Wars: Idle",
+		PromoteStatusLabel = "Auto Promote: Idle",
+		AutoResupplyStatusLabel = "Auto Resupply: Idle",
+		AutoResupplyDetailsLabel = "Resupply Details: (none)",
+		UnitTagsStatusLabel = "Unit Tags: Idle",
+		PolicyStatusLabel = "Auto Policy: Idle",
+		PolicyCountLabel = "Policies Loaded: 0",
+		WatcherStatusLabel = "Rebel Watch: Idle",
+		JustWatchStatusLabel = "Justify Watch: Idle",
+		LeaderWatchStatusLabel = "Leader Watch: Idle",
+		AutoBuildStatusLabel = "Auto Build: Idle",
+		BuildCitiesFolderLabel = "Cities Folder: ?",
+		BuildCitiesCountLabel = "Cities Found: 0",
+		BuildCityLabel = "City: ?",
+		BuildTierLabel = "Tier: ?",
+		BuildInfraLabel = "Infrastructure: ?",
+		BuildFundsLabel = "Funds: ?",
+		BuildQueueLabel = "Queue Unit: ?",
+		BuildAttemptLabel = "Build Attempt: (none)"
+	}
+	local status = {}
+	for key, value in pairs(defaults) do
+		status[key] = makeHeadlessStatus(value)
+	end
+	buildPolicyInfo()
+	status.PolicyCountLabel:SetText("Policies Loaded: " .. tostring(#Policy.Info))
+	safeNotify("RoN Nation Brain", "UI library failed; automations are running headless.", 5)
+	warn("[RoN Nation Brain] UI library failed:", tostring(reason))
+	return {
+		Status = status,
+		setTradeValidList = function(names)
+			status.TradeValidLabel:SetText("Valid countries: " .. tostring(#(names or {})))
+		end,
+		updateDashboard = function() end,
+		updateBrainUI = function() end
+	}
+end
+
+local function loadBrainUI()
+	local ok, result = pcall(function()
+		local source = game:HttpGet(BrainUILibraryUrl)
+		local chunk, loadErr = loadstring(source)
+		if not chunk then
+			error(loadErr or "loadstring failed")
+		end
+		local library = chunk()
+		if type(library) ~= "table" or type(library.new) ~= "function" then
+			error("library did not return BrainUI.new")
+		end
+		return library.new({
+			CONFIG = CONFIG,
+			CoreGui = CoreGui,
+			UserInputService = UserInputService,
+			workspace = workspace,
+			Resources = Resources,
+			BuildingsFolder = BuildingsFolder,
+			CountryData = CountryData,
+			Policy = Policy,
+			assertStillLeader = assertStillLeader,
+			getAllMyCitiesSorted = getAllMyCitiesSorted,
+			getMyFunds = getMyFunds,
+			getPolicyPower = getPolicyPower,
+			getCountryResourceFlow = getCountryResourceFlow,
+			getTradeCount = getTradeCount,
+			getNetIncome = getNetIncome,
+			computeTotalNeedByResource = computeTotalNeedByResource,
+			scanAndResupplyOnce = scanAndResupplyOnce,
+			attemptAutoBuildOnce = attemptAutoBuildOnce,
+			doAutoPolicy = doAutoPolicy,
+			safeNotify = safeNotify,
+			buildPolicyInfo = buildPolicyInfo
+		})
+	end)
+	if ok and result and result.Status then
+		return result
+	end
+	return makeHeadlessBrainUI(result)
+end
+
+local BrainUI = loadBrainUI()
 
 local DashCountryLabel = BrainUI.Status.DashCountryLabel
 local DashFundsLabel = BrainUI.Status.DashFundsLabel

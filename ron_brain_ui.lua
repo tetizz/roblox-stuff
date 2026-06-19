@@ -38,6 +38,7 @@ local UI = {
 	QueueRows = {},
 	ResourceRows = {},
 	Cards = {},
+	PageConnections = {},
 	LastAction = { id = "refresh", title = "Refresh nation scan", risk = "Low" }
 }
 
@@ -188,6 +189,11 @@ local function bindStatus(parent, y, title, obj)
 	return y + 32
 end
 
+local function trackPageConnection(conn)
+	UI.PageConnections[#UI.PageConnections + 1] = conn
+	return conn
+end
+
 local function setBar(bar, value)
 	if not bar or not bar.Fill then return end
 	value = clamp(value, 0, 100)
@@ -220,16 +226,27 @@ local function formatMoney(value)
 	return tostring(math.floor(value))
 end
 
+local function readObjectValue(obj)
+	if not obj then return end
+	local ok, value = pcall(function()
+		return obj.Value
+	end)
+	if ok then
+		return value
+	end
+end
+
 local function readNumberObject(obj)
 	if not obj then return end
+	local value = readObjectValue(obj)
 	if obj:IsA("NumberValue") or obj:IsA("IntValue") then
-		return obj.Value
+		return value
 	end
-	if obj:IsA("Vector3Value") and typeof(obj.Value) == "Vector3" then
-		return tonumber(obj.Value.X)
+	if obj:IsA("Vector3Value") and typeof(value) == "Vector3" then
+		return tonumber(value.X)
 	end
 	if obj:IsA("StringValue") then
-		return tonumber(obj.Value)
+		return tonumber(value)
 	end
 end
 
@@ -309,10 +326,11 @@ local function resourceFlowRows(myCountry, maxRows)
 	if not folder then return rows end
 	for _, resource in ipairs(folder:GetChildren()) do
 		local flow = resource:FindFirstChild("Flow")
-		if flow and type(flow.Value) == "number" then
+		local value = readObjectValue(flow)
+		if type(value) == "number" then
 			rows[#rows + 1] = {
 				name = resource.Name,
-				flow = flow.Value
+				flow = value
 			}
 		end
 	end
@@ -485,7 +503,7 @@ local function buildBrainSnapshot()
 	return {
 		online = true,
 		country = myCountry.Name,
-		leader = tostring((myCountry:FindFirstChild("Leader") and myCountry.Leader.Value) or "?"),
+		leader = tostring(readObjectValue(myCountry:FindFirstChild("Leader")) or "?"),
 		cities = #cities,
 		funds = funds,
 		net = net,
@@ -669,22 +687,22 @@ local function makeSlider(parent, y, text, value, min, max, suffix, callback)
 		callback(value)
 	end
 	setFromAlpha((value - min) / (max - min))
-	bar.InputBegan:Connect(function(input)
+	trackPageConnection(bar.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
 			setFromAlpha((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X)
 		end
-	end)
-	UserInputService.InputChanged:Connect(function(input)
+	end))
+	trackPageConnection(UserInputService.InputChanged:Connect(function(input)
 		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
 			setFromAlpha((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X)
 		end
-	end)
-	UserInputService.InputEnded:Connect(function(input)
+	end))
+	trackPageConnection(UserInputService.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = false
 		end
-	end)
+	end))
 	return y + 64
 end
 
@@ -717,6 +735,12 @@ end
 
 local function clearPage()
 	if not UI.Page then return end
+	for _, conn in ipairs(UI.PageConnections) do
+		if conn and conn.Disconnect then
+			conn:Disconnect()
+		end
+	end
+	UI.PageConnections = {}
 	for _, child in ipairs(UI.Page:GetChildren()) do
 		child:Destroy()
 	end
@@ -1312,51 +1336,51 @@ local function createNationBrainUI()
 end
 
 -- Dashboard labels used by the scheduler and status pages.
-local DashCountryLabel = wrapStatus("Country: ?")
-local DashFundsLabel = wrapStatus("Funds: ?")
-local DashPoliticalLabel = wrapStatus("Political Power: ?")
-local DashCitiesLabel = wrapStatus("Cities: ?")
-local DashTradeLabel = wrapStatus("Trade: ?")
-local DashFlowLabel = wrapStatus("Flow: ?")
-local DashWarsLabel = wrapStatus("Wars: ?")
-local DashAutoLabel = wrapStatus("Enabled: none")
-local DashWarLabel = wrapStatus("War: idle")
-local DashBuildLabel = wrapStatus("Build: idle")
-local DashResourceLabel = wrapStatus("Resources: idle")
-local DashWatcherLabel = wrapStatus("Watchers: idle")
-local DashPolicyLabel = wrapStatus("Policy: idle")
+DashCountryLabel = wrapStatus("Country: ?")
+DashFundsLabel = wrapStatus("Funds: ?")
+DashPoliticalLabel = wrapStatus("Political Power: ?")
+DashCitiesLabel = wrapStatus("Cities: ?")
+DashTradeLabel = wrapStatus("Trade: ?")
+DashFlowLabel = wrapStatus("Flow: ?")
+DashWarsLabel = wrapStatus("Wars: ?")
+DashAutoLabel = wrapStatus("Enabled: none")
+DashWarLabel = wrapStatus("War: idle")
+DashBuildLabel = wrapStatus("Build: idle")
+DashResourceLabel = wrapStatus("Resources: idle")
+DashWatcherLabel = wrapStatus("Watchers: idle")
+DashPolicyLabel = wrapStatus("Policy: idle")
 
-local TradeStatusLabel = wrapStatus("Status: Idle")
-local TradeCountryLabel = wrapStatus("Country: ?")
-local TradePartnerLabel = wrapStatus("Partners: ?")
-local TradeFlowLabel = wrapStatus("Flow: ?")
-local TradeIncomeLabel = wrapStatus("Trade Export: ?")
-local TradePercentLabel = wrapStatus("Trade Percent: ?")
-local TradeAttemptingLabel = wrapStatus("Attempting to trade: (none)")
-local TradeValidLabel = wrapStatus("Valid countries: 0")
-local TradeValidListLabel = wrapStatus("Valid list: (none)")
-local TradeFlowSafetyLabel = wrapStatus("Flow Safety: ON")
+TradeStatusLabel = wrapStatus("Status: Idle")
+TradeCountryLabel = wrapStatus("Country: ?")
+TradePartnerLabel = wrapStatus("Partners: ?")
+TradeFlowLabel = wrapStatus("Flow: ?")
+TradeIncomeLabel = wrapStatus("Trade Export: ?")
+TradePercentLabel = wrapStatus("Trade Percent: ?")
+TradeAttemptingLabel = wrapStatus("Attempting to trade: (none)")
+TradeValidLabel = wrapStatus("Valid countries: 0")
+TradeValidListLabel = wrapStatus("Valid list: (none)")
+TradeFlowSafetyLabel = wrapStatus("Flow Safety: ON")
 
-local WarStatusLabel = wrapStatus("Auto Wars: Idle")
-local PromoteStatusLabel = wrapStatus("Auto Promote: Idle")
-local AutoResupplyStatusLabel = wrapStatus("Auto Resupply: Idle")
-local AutoResupplyDetailsLabel = wrapStatus("Resupply Details: (none)")
-local UnitTagsStatusLabel = wrapStatus("Unit Tags: Idle")
-local PolicyStatusLabel = wrapStatus("Auto Policy: Idle")
-local PolicyCountLabel = wrapStatus("Policies Loaded: 0")
-local WatcherStatusLabel = wrapStatus("Rebel Watch: Idle")
-local JustWatchStatusLabel = wrapStatus("Justify Watch: Idle")
-local LeaderWatchStatusLabel = wrapStatus("Leader Watch: Idle")
+WarStatusLabel = wrapStatus("Auto Wars: Idle")
+PromoteStatusLabel = wrapStatus("Auto Promote: Idle")
+AutoResupplyStatusLabel = wrapStatus("Auto Resupply: Idle")
+AutoResupplyDetailsLabel = wrapStatus("Resupply Details: (none)")
+UnitTagsStatusLabel = wrapStatus("Unit Tags: Idle")
+PolicyStatusLabel = wrapStatus("Auto Policy: Idle")
+PolicyCountLabel = wrapStatus("Policies Loaded: 0")
+WatcherStatusLabel = wrapStatus("Rebel Watch: Idle")
+JustWatchStatusLabel = wrapStatus("Justify Watch: Idle")
+LeaderWatchStatusLabel = wrapStatus("Leader Watch: Idle")
 
-local AutoBuildStatusLabel = wrapStatus("Auto Build: Idle")
-local BuildCitiesFolderLabel = wrapStatus("Cities Folder: ?")
-local BuildCitiesCountLabel = wrapStatus("Cities Found: 0")
-local BuildCityLabel = wrapStatus("City: ?")
-local BuildTierLabel = wrapStatus("Tier: ?")
-local BuildInfraLabel = wrapStatus("Infrastructure: ?")
-local BuildFundsLabel = wrapStatus("Funds: ?")
-local BuildQueueLabel = wrapStatus("Queue Unit: ?")
-local BuildAttemptLabel = wrapStatus("Build Attempt: (none)")
+AutoBuildStatusLabel = wrapStatus("Auto Build: Idle")
+BuildCitiesFolderLabel = wrapStatus("Cities Folder: ?")
+BuildCitiesCountLabel = wrapStatus("Cities Found: 0")
+BuildCityLabel = wrapStatus("City: ?")
+BuildTierLabel = wrapStatus("Tier: ?")
+BuildInfraLabel = wrapStatus("Infrastructure: ?")
+BuildFundsLabel = wrapStatus("Funds: ?")
+BuildQueueLabel = wrapStatus("Queue Unit: ?")
+BuildAttemptLabel = wrapStatus("Build Attempt: (none)")
 
 local function setTradeValidList(names)
 	TradeValidLabel:SetText("Valid countries: " .. tostring(#names))
