@@ -2,7 +2,29 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-19.1"
+BrainUI.Version = "2026-06-19.2"
+BrainUI.UniversalUIVersion = "2026-06-19.1"
+
+local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/1935bd51131e7f9137ee0504c2271d66e9a424ef/universal_ui.lua"
+
+local function loadUniversalUI()
+	local ok, result = pcall(function()
+		local source = game:HttpGet(UniversalUILibraryUrl)
+		local chunk, loadErr = loadstring(source)
+		if not chunk then
+			error(loadErr or "loadstring failed")
+		end
+		local library = chunk()
+		if type(library) ~= "table" or library.Version ~= BrainUI.UniversalUIVersion then
+			error("universal UI version mismatch: " .. tostring(library and library.Version))
+		end
+		return library
+	end)
+	if ok then
+		return result
+	end
+	warn("[RoN Nation Brain] universal UI unavailable:", tostring(result))
+end
 
 function BrainUI.new(ctx)
 	local CONFIG = ctx.CONFIG
@@ -27,6 +49,9 @@ function BrainUI.new(ctx)
 	local doAutoPolicy = ctx.doAutoPolicy
 	local safeNotify = ctx.safeNotify
 	local buildPolicyInfo = ctx.buildPolicyInfo
+
+	local UniversalUI = ctx.UniversalUI or loadUniversalUI()
+	local Primitives = UniversalUI and UniversalUI.Primitives
 
 	local updateBrainUI
 -- Custom Nation Brain UI
@@ -53,7 +78,7 @@ local PolicyStatusLabel, PolicyCountLabel, WatcherStatusLabel, JustWatchStatusLa
 local AutoBuildStatusLabel, BuildCitiesFolderLabel, BuildCitiesCountLabel, BuildCityLabel, BuildTierLabel
 local BuildInfraLabel, BuildFundsLabel, BuildQueueLabel, BuildAttemptLabel
 
-local C = {
+local C = (UniversalUI and UniversalUI.Themes and UniversalUI.Themes.NationBrain) or {
 	bg = Color3.fromRGB(5, 14, 23),
 	panel = Color3.fromRGB(9, 23, 34),
 	panel2 = Color3.fromRGB(12, 28, 41),
@@ -67,6 +92,9 @@ local C = {
 }
 
 local function clamp(n, lo, hi)
+	if Primitives and Primitives.clamp then
+		return Primitives.clamp(n, lo, hi)
+	end
 	n = tonumber(n) or 0
 	if n < lo then return lo end
 	if n > hi then return hi end
@@ -74,6 +102,9 @@ local function clamp(n, lo, hi)
 end
 
 local function inst(className, props)
+	if Primitives and Primitives.inst then
+		return Primitives.inst(className, props)
+	end
 	local obj = Instance.new(className)
 	for key, value in pairs(props or {}) do
 		obj[key] = value
@@ -82,6 +113,9 @@ local function inst(className, props)
 end
 
 local function corner(parent, radius)
+	if Primitives and Primitives.corner then
+		return Primitives.corner(parent, radius)
+	end
 	return inst("UICorner", {
 		CornerRadius = UDim.new(0, radius or 8),
 		Parent = parent
@@ -89,6 +123,9 @@ local function corner(parent, radius)
 end
 
 local function stroke(parent, color, transparency, thickness)
+	if Primitives and Primitives.stroke then
+		return Primitives.stroke(parent, color or C.line, transparency, thickness)
+	end
 	return inst("UIStroke", {
 		Color = color or C.line,
 		Transparency = transparency or 0.25,
@@ -98,6 +135,9 @@ local function stroke(parent, color, transparency, thickness)
 end
 
 local function gradient(parent, a, b, rotation)
+	if Primitives and Primitives.gradient then
+		return Primitives.gradient(parent, a, b, rotation)
+	end
 	return inst("UIGradient", {
 		Color = ColorSequence.new(a, b),
 		Rotation = rotation or 90,
@@ -106,6 +146,9 @@ local function gradient(parent, a, b, rotation)
 end
 
 local function makeText(parent, text, pos, size, fontSize, color, bold)
+	if Primitives and Primitives.text then
+		return Primitives.text(parent, text, pos, size, fontSize, color or C.text, bold)
+	end
 	local label = inst("TextLabel", {
 		BackgroundTransparency = 1,
 		Position = pos,
@@ -123,6 +166,9 @@ local function makeText(parent, text, pos, size, fontSize, color, bold)
 end
 
 local function makePanel(parent, pos, size, name)
+	if Primitives and Primitives.panel then
+		return Primitives.panel(parent, pos, size, name, C)
+	end
 	local frame = inst("Frame", {
 		Name = name or "Panel",
 		BackgroundColor3 = C.panel,
@@ -138,6 +184,9 @@ local function makePanel(parent, pos, size, name)
 end
 
 local function makeLine(parent, x1, y1, x2, y2, color, thickness, transparency)
+	if Primitives and Primitives.line then
+		return Primitives.line(parent, x1, y1, x2, y2, color, thickness, transparency)
+	end
 	local dx = x2 - x1
 	local dy = y2 - y1
 	local length = math.sqrt(dx * dx + dy * dy)
@@ -155,6 +204,9 @@ local function makeLine(parent, x1, y1, x2, y2, color, thickness, transparency)
 end
 
 local function makeDashedLine(parent, x1, y1, x2, y2, color)
+	if Primitives and Primitives.dashedLine then
+		return Primitives.dashedLine(parent, x1, y1, x2, y2, color or C.green)
+	end
 	local parts = 14
 	for i = 0, parts - 1, 2 do
 		local a = i / parts
@@ -571,6 +623,9 @@ local function buildBrainSnapshot()
 end
 
 local function makeProgress(parent, pos, size, color)
+	if Primitives and Primitives.progress then
+		return Primitives.progress(parent, pos, size, color or C.green, C)
+	end
 	local outer = inst("Frame", {
 		BackgroundColor3 = Color3.fromRGB(34, 48, 58),
 		BorderSizePixel = 0,
@@ -590,6 +645,9 @@ local function makeProgress(parent, pos, size, color)
 end
 
 local function makeButton(parent, text, pos, size, callback)
+	if Primitives and Primitives.button then
+		return Primitives.button(parent, text, pos, size, callback, C)
+	end
 	local button = inst("TextButton", {
 		BackgroundColor3 = Color3.fromRGB(14, 45, 76),
 		BorderSizePixel = 0,
