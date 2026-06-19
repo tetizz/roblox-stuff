@@ -4,7 +4,7 @@
 local UniversalUI = {}
 
 UniversalUI.Name = "Universal UI"
-UniversalUI.Version = "2026-06-19.5"
+UniversalUI.Version = "2026-06-19.6"
 
 UniversalUI.Themes = {
 	Default = {
@@ -312,9 +312,19 @@ local function resolveParent(parent)
 	if okCore and coreGui then
 		return coreGui
 	end
-	local players = game:GetService("Players")
-	local localPlayer = players.LocalPlayer
-	return localPlayer and localPlayer:WaitForChild("PlayerGui")
+	local okPlayers, players = pcall(function()
+		return game:GetService("Players")
+	end)
+	local localPlayer = okPlayers and players and players.LocalPlayer
+	if localPlayer then
+		local okGui, playerGui = pcall(function()
+			return localPlayer:WaitForChild("PlayerGui", 5)
+		end)
+		if okGui and playerGui then
+			return playerGui
+		end
+	end
+	warn("[UniversalUI] no GUI parent available")
 end
 
 UniversalUI.Primitives = {
