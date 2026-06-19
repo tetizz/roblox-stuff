@@ -147,6 +147,17 @@ local function safeNotify(title, text, duration)
 	end)
 end
 
+local function safeFireServer(label, remote, ...)
+	local args = { ... }
+	local ok, err = pcall(function()
+		remote:FireServer(unpack(args))
+	end)
+	if not ok then
+		debugPrint("[Remote]", tostring(label) .. " failed", tostring(err))
+	end
+	return ok, err
+end
+
 --============================================================
 -- Simple scheduler (streamlines loops)
 --============================================================
@@ -262,13 +273,6 @@ local function buildPlayerIdentitySet()
 end
 
 local function isCountryAI(country, playerSet)
-	-- Your rule request:
-	-- 1) "check if a country is not a player"
-	-- 2) "include the country's name into the name of leader to see if it's ai"
-	-- Practical detection:
-	-- - Leader object value NOT equal to any player identity => AI
-	-- - OR leader string contains "AI"
-	-- - OR leader string contains the country name (common AI labeling)
 	local leader = country:FindFirstChild("Leader")
 	if not leader then
 		return true
@@ -286,7 +290,6 @@ local function isCountryAI(country, playerSet)
 		return false
 	end
 
-	-- If it isn't any current player identity, treat as AI
 	return true
 end
 
@@ -524,17 +527,7 @@ local function computeUnitsFromNet(netIncome, unitSellPrice)
 end
 
 local function sendTrade(target, resource, units, mode)
-	local ok, err = pcall(function()
-		ManageAlliance:FireServer(
-			target,
-			"ResourceTrade",
-			{ resource, mode or "Sell", units, 1, "Trade" }
-		)
-	end)
-	if not ok then
-		debugPrint("[Remote]", "Trade send failed", target, resource, tostring(err))
-	end
-	return ok, err
+	return safeFireServer("Trade", ManageAlliance, target, "ResourceTrade", { resource, mode or "Sell", units, 1, "Trade" })
 end
 
 local function tradeExists(myCountry, resource, targetName)
@@ -651,7 +644,7 @@ local function canAffordBuilding(buildingName)
 end
 
 local function fireCreateBuilding(city, buildingName)
-	CreateBuilding:FireServer({ city }, buildingName)
+	return safeFireServer("CreateBuilding", CreateBuilding, { city }, buildingName)
 end
 
 --============================================================
@@ -796,17 +789,7 @@ local function buildAISuppliers(myCountry, resourceName, playerSet)
 end
 
 local function sendBuy(targetCountry, resourceName, amount)
-	local ok, err = pcall(function()
-		ManageAlliance:FireServer(
-			targetCountry,
-			"ResourceTrade",
-			{ resourceName, "Buy", amount, 1, "Trade" }
-		)
-	end)
-	if not ok then
-		debugPrint("[Remote]", "Buy send failed", targetCountry, resourceName, tostring(err))
-	end
-	return ok, err
+	return safeFireServer("Buy", ManageAlliance, targetCountry, "ResourceTrade", { resourceName, "Buy", amount, 1, "Trade" })
 end
 
 local function attemptResupplyResource(myCountry, resourceName, delta, playerSet, statusOut)
@@ -1197,10 +1180,12 @@ local function doAutoJustify()
 				War.Justified[name] = nil
 				skipped = skipped + 1
 			elseif (not War.Justified[name]) or War.Justified[name] <= t then
-				JustifyWar:FireServer(name, "Conquest")
+				local sent = safeFireServer("JustifyWar", JustifyWar, name, "Conquest")
 				War.Justified[name] = t + CONFIG.AutoJustifyRetrySeconds
-				attempted = attempted + 1
-				debugPrint("[War]", "Justified on", name)
+				if sent then
+					attempted = attempted + 1
+					debugPrint("[War]", "Justified on", name)
+				end
 			end
 		else
 			filtered = filtered + 1
@@ -1224,9 +1209,10 @@ local function doAutoDeclare()
 		local name = c.Name
 		if isWarTargetAllowed(myCountry, c, playerSet) then
 			if not War.Declared[name] and hasConquestCB(myCountry, name) then
-				ManageAlliance:FireServer(name, "WarDeclare", "Conquest")
-				War.Declared[name] = true
-				debugPrint("[War]", "Declared on", name)
+				if safeFireServer("WarDeclare", ManageAlliance, name, "WarDeclare", "Conquest") then
+					War.Declared[name] = true
+					debugPrint("[War]", "Declared on", name)
+				end
 			end
 		end
 	end
@@ -1260,6 +1246,7 @@ local function doAutoPeace()
 			local attacker = war:FindFirstChild("Attacker")
 			if attacker and attacker:FindFirstChild(myCountry.Name) then
 				local defender = war:FindFirstChild("Defender")
+				local allSent = true
 				if defender then
 					for _, def in ipairs(defender:GetChildren()) do
 						local defName = def.Name
@@ -1276,11 +1263,16 @@ local function doAutoPeace()
 								}
 							}
 						}
-						ManageAlliance:FireServer(unpack(args))
-						debugPrint("[War]", ("PeaceOut to %s for '%s'"):format(defName, warName))
+						if safeFireServer("PeaceOut", ManageAlliance, unpack(args)) then
+							debugPrint("[War]", ("PeaceOut to %s for '%s'"):format(defName, warName))
+						else
+							allSent = false
+						end
 					end
 				end
-				War.ProcessedWars[warName] = true
+				if allSent then
+					War.ProcessedWars[warName] = true
+				end
 			end
 		end
 	end
@@ -1412,9 +1404,12 @@ local function doAutoPromote()
 
 	for _, leaderObj in ipairs(current:GetChildren()) do
 		if leaderObj:GetAttribute("Corrupt") == true then
-			CountryWorker:FireServer("CountryLeader", { leaderObj.Name, "Promote" })
-			Promote.LastStatus = "Promoted: " .. leaderObj.Name
-			safeNotify("Auto Promote", "Promoted: " .. leaderObj.Name, 3)
+			if safeFireServer("CountryLeader Promote", CountryWorker, "CountryLeader", { leaderObj.Name, "Promote" }) then
+				Promote.LastStatus = "Promoted: " .. leaderObj.Name
+				safeNotify("Auto Promote", "Promoted: " .. leaderObj.Name, 3)
+			else
+				Promote.LastStatus = "Promote failed: " .. leaderObj.Name
+			end
 			return
 		end
 	end
@@ -1524,9 +1519,10 @@ local function doAutoPolicy()
 		if Policy.Selected[policy.name] then
 			selected = selected + 1
 			if not active[policy.name] and not Policy.RecentlyEnacted[policy.name] and power >= policy.cost then
-				ChangeLaw:FireServer("Policy", policy.name)
-				Policy.RecentlyEnacted[policy.name] = true
-				enacted = enacted + 1
+				if safeFireServer("Policy", ChangeLaw, "Policy", policy.name) then
+					Policy.RecentlyEnacted[policy.name] = true
+					enacted = enacted + 1
+				end
 			end
 		end
 	end

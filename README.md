@@ -4,7 +4,7 @@ Scripts I made.
 
 - `RoN Automation.lua` - optimized Rise of Nations automation hub that loads the custom Nation Brain interface library.
 - `ron_brain_ui.lua` - custom RoN Nation Brain GUI library used by the main automation script.
-- `universal_ui.lua` - reusable Roblox UI toolkit for any game script.
+- `universal_ui.lua` - reusable Roblox UI/runtime toolkit for any game script.
 - `universal_ui_demo.lua` - small standalone demo for the universal UI toolkit.
 - `init.lua` - short loader for `RoN Automation.lua`.
 - `load ron automation.lua` - short loadstring loader for `RoN Automation.lua`.
@@ -31,6 +31,16 @@ local section = tab:AddSection("Automation")
 local status = section:AddStatus("State", "Idle")
 section:AddToggle("Enabled", false, function(value)
 	status:SetText(value and "Running" or "Idle")
+end)
+
+local target = section:AddSlider("Target", 10, 1, 100, "")
+target:OnChanged(function(value)
+	print("target", value)
+end)
+
+local runtime = UI.createRuntime({ Name = "MyHubRuntime" })
+runtime:Every("scan", 2, function()
+	print("safe reusable loop")
 end)
 ```
 

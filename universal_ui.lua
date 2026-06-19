@@ -4,7 +4,7 @@
 local UniversalUI = {}
 
 UniversalUI.Name = "Universal UI"
-UniversalUI.Version = "2026-06-19.2"
+UniversalUI.Version = "2026-06-19.3"
 
 UniversalUI.Themes = {
 	Default = {
@@ -232,14 +232,40 @@ local function button(parent, value, pos, size, callback, theme)
 	return btn
 end
 
-local function runCallback(callback, ...)
+local function safeCall(label, callback, ...)
 	if not callback then
-		return
+		return true
 	end
-	local ok, err = pcall(callback, ...)
+	if type(callback) ~= "function" then
+		return false, "callback missing"
+	end
+	local args = { ... }
+	local ok, err = pcall(function()
+		return callback(unpack(args))
+	end)
 	if not ok then
-		warn("[UniversalUI] callback failed:", tostring(err))
+		warn("[UniversalUI]", tostring(label or "callback"), tostring(err))
 	end
+	return ok, err
+end
+
+local function runCallback(callback, ...)
+	return safeCall("callback failed:", callback, ...)
+end
+
+local function safeFireServer(label, remote, ...)
+	if not remote or type(remote.FireServer) ~= "function" then
+		warn("[UniversalUI]", tostring(label or "remote"), "missing FireServer")
+		return false, "missing FireServer"
+	end
+	local args = { ... }
+	local ok, err = pcall(function()
+		remote:FireServer(unpack(args))
+	end)
+	if not ok then
+		warn("[UniversalUI]", tostring(label or "remote"), tostring(err))
+	end
+	return ok, err
 end
 
 local function disconnectConnections(list)
@@ -286,7 +312,9 @@ UniversalUI.Primitives = {
 	button = button,
 	clamp = clamp,
 	mergeTheme = mergeTheme,
-	disconnectConnections = disconnectConnections
+	disconnectConnections = disconnectConnections,
+	safeCall = safeCall,
+	safeFireServer = safeFireServer
 }
 
 local function makeStatus(initial)
@@ -306,10 +334,123 @@ end
 local WindowMethods = {}
 local TabMethods = {}
 local SectionMethods = {}
+local RuntimeMethods = {}
 
 local function track(window, conn)
 	window.Connections[#window.Connections + 1] = conn
 	return conn
+end
+
+function RuntimeMethods:Track(conn)
+	self.Connections[#self.Connections + 1] = conn
+	return conn
+end
+
+function RuntimeMethods:DisconnectAll()
+	disconnectConnections(self.Connections)
+	self.Connections = {}
+end
+
+function RuntimeMethods:Destroy()
+	self.Alive = false
+	for _, token in ipairs(self.Tasks) do
+		token.Alive = false
+	end
+	self.Tasks = {}
+	self:DisconnectAll()
+	if _G and self.CleanupKey and _G[self.CleanupKey] == self.DestroyCallback then
+		_G[self.CleanupKey] = nil
+	end
+end
+
+function RuntimeMethods:Every(key, interval, callback)
+	if not self.Alive then
+		return false
+	end
+	local t = os.clock()
+	key = tostring(key or "loop")
+	interval = tonumber(interval) or 1
+	local last = self.Last[key]
+	if last and (t - last) < interval then
+		return false
+	end
+	self.Last[key] = t
+
+	local ok, err
+	if type(callback) == "function" then
+		ok, err = pcall(callback, self)
+	else
+		ok, err = false, "callback missing"
+	end
+	if ok then
+		self.Errors[key] = 0
+		return true
+	end
+
+	self.Errors[key] = (self.Errors[key] or 0) + 1
+	local lastWarn = self.LastWarn[key] or 0
+	if (t - lastWarn) >= self.ErrorCooldown then
+		self.LastWarn[key] = t
+		warn("[UniversalUI Runtime]", self.Name, key, tostring(err))
+	end
+	return false, err
+end
+
+function RuntimeMethods:Delay(seconds, callback)
+	local token = { Alive = true }
+	self.Tasks[#self.Tasks + 1] = token
+	task.delay(tonumber(seconds) or 0, function()
+		if self.Alive and token.Alive then
+			safeCall(self.Name .. ".delay", callback, self)
+		end
+	end)
+	return function()
+		token.Alive = false
+	end
+end
+
+function RuntimeMethods:Spawn(callback)
+	local token = { Alive = true }
+	self.Tasks[#self.Tasks + 1] = token
+	task.spawn(function()
+		if self.Alive and token.Alive then
+			safeCall(self.Name .. ".spawn", callback, self)
+		end
+	end)
+	return function()
+		token.Alive = false
+	end
+end
+
+function UniversalUI.createRuntime(options)
+	options = options or {}
+	local name = tostring(options.Name or "UniversalRuntime")
+	local cleanupKey = "_UniversalRuntime_" .. sanitizeKey(options.CleanupKey or name)
+
+	if _G and type(_G[cleanupKey]) == "function" then
+		pcall(_G[cleanupKey])
+	end
+
+	local runtime = setmetatable({
+		Name = name,
+		Alive = true,
+		Connections = {},
+		Tasks = {},
+		Last = {},
+		Errors = {},
+		LastWarn = {},
+		ErrorCooldown = tonumber(options.ErrorCooldown) or 10,
+		CleanupKey = cleanupKey,
+		DestroyCallback = nil
+	}, { __index = RuntimeMethods })
+
+	runtime.DestroyCallback = function()
+		runtime:Destroy()
+	end
+	if _G then
+		_G[cleanupKey] = runtime.DestroyCallback
+	end
+	return runtime
 end
 
 local function updateScrollCanvas(tab)
@@ -404,6 +545,12 @@ function WindowMethods:SetStatus(textValue, color)
 end
 
 function WindowMethods:Notify(titleValue, bodyValue, duration)
+	if type(titleValue) == "table" then
+		local opts = titleValue
+		titleValue = opts.Title or opts.title or "Notice"
+		bodyValue = opts.Description or opts.Text or opts.Body or opts.description or opts.text or opts.body or ""
+		duration = opts.Time or opts.Duration or opts.time or opts.duration or duration
+	end
 	local theme = self.Theme
 	local toast = panel(
 		self.Root,
@@ -564,6 +711,19 @@ function SectionMethods:AddParagraph(value)
 	return label
 end
 
+function SectionMethods:AddDivider()
+	local row = self:_row(12, "DividerRow")
+	local bar = inst("Frame", {
+		BackgroundColor3 = self.Theme.line,
+		BackgroundTransparency = 0.35,
+		BorderSizePixel = 0,
+		Position = UDim2.new(0, 0, 0.5, 0),
+		Size = UDim2.new(1, 0, 0, 1),
+		Parent = row
+	})
+	return bar
+end
+
 function SectionMethods:AddStatus(titleValue, initial)
 	local theme = self.Theme
 	local row = self:_row(28, "StatusRow")
@@ -581,6 +741,65 @@ function SectionMethods:AddButton(titleValue, callback)
 	self.Controls[#self.Controls + 1] = btn
 	return btn
 end
+
+function SectionMethods:AddTextBox(titleValue, initial, placeholder, callback)
+	local theme = self.Theme
+	local row = self:_row(48, "TextBoxRow")
+	text(row, titleValue or "Text", UDim2.fromOffset(0, 0), UDim2.new(0.42, -8, 1, 0), 13, theme.text, false)
+	local box = inst("TextBox", {
+		BackgroundColor3 = Color3.fromRGB(10, 24, 36),
+		BorderSizePixel = 0,
+		ClearTextOnFocus = false,
+		PlaceholderText = tostring(placeholder or ""),
+		Position = UDim2.new(0.42, 0, 0, 8),
+		Size = UDim2.new(0.58, 0, 0, 30),
+		Text = tostring(initial or ""),
+		TextColor3 = theme.text,
+		TextSize = 12,
+		Font = Enum.Font.Gotham,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = row
+	})
+	corner(box, 5)
+	stroke(box, theme.line, 0.15, 1)
+
+	local control = {
+		Text = box.Text,
+		Callbacks = {}
+	}
+	local function apply(value, fire, enterPressed)
+		box.Text = tostring(value or "")
+		control.Text = box.Text
+		if fire then
+			runCallback(callback, box.Text, enterPressed)
+			for _, fn in ipairs(control.Callbacks) do
+				runCallback(fn, box.Text, enterPressed)
+			end
+		end
+	end
+	function control:Set(value)
+		apply(value, false)
+	end
+	function control:SetText(value)
+		apply(value, false)
+	end
+	function control:Get()
+		return box.Text
+	end
+	function control:OnChanged(fn)
+		if type(fn) == "function" then
+			self.Callbacks[#self.Callbacks + 1] = fn
+		end
+		return self
+	end
+	track(self.Window, box.FocusLost:Connect(function(enterPressed)
+		apply(box.Text, true, enterPressed)
+	end))
+	self.Controls[#self.Controls + 1] = control
+	return control
+end
+
+SectionMethods.AddTextbox = SectionMethods.AddTextBox
 
 function SectionMethods:AddProgress(titleValue, initial, color)
 	local theme = self.Theme
@@ -616,21 +835,37 @@ function SectionMethods:AddToggle(titleValue, initial, callback)
 		Parent = row
 	})
 	corner(btn, 11)
-	local control = {}
+	local control = {
+		Value = value,
+		Callbacks = {}
+	}
 	local function apply(nextValue, fire)
 		value = nextValue == true
+		control.Value = value
 		btn.BackgroundColor3 = value and theme.green or Color3.fromRGB(42, 51, 61)
 		btn.Text = value and "ON" or "OFF"
 		btn.TextColor3 = value and theme.dark or theme.muted
 		if fire then
 			runCallback(callback, value)
+			for _, fn in ipairs(control.Callbacks) do
+				runCallback(fn, value)
+			end
 		end
 	end
 	function control:Set(nextValue)
 		apply(nextValue, false)
 	end
+	function control:SetValue(nextValue)
+		apply(nextValue, false)
+	end
 	function control:Get()
 		return value
+	end
+	function control:OnChanged(fn)
+		if type(fn) == "function" then
+			self.Callbacks[#self.Callbacks + 1] = fn
+		end
+		return self
 	end
 	track(self.Window, btn.MouseButton1Click:Connect(function()
 		apply(not value, true)
@@ -733,7 +968,12 @@ function SectionMethods:AddSlider(titleValue, initial, minValue, maxValue, suffi
 	})
 	corner(fill, 4)
 	local dragging = false
-	local control = {}
+	local control = {
+		Value = value,
+		Min = minValue,
+		Max = maxValue,
+		Callbacks = {}
+	}
 	local function apply(nextValue, fire)
 		value = clamp(nextValue, minValue, maxValue)
 		if maxValue - minValue > 20 then
@@ -741,10 +981,16 @@ function SectionMethods:AddSlider(titleValue, initial, minValue, maxValue, suffi
 		else
 			value = math.floor(value * 10 + 0.5) / 10
 		end
+		control.Value = value
+		control.Min = minValue
+		control.Max = maxValue
 		fill.Size = UDim2.new((value - minValue) / (maxValue - minValue), 0, 1, 0)
 		valueLabel.Text = tostring(value) .. (suffix or "")
 		if fire then
 			runCallback(callback, value)
+			for _, fn in ipairs(control.Callbacks) do
+				runCallback(fn, value)
+			end
 		end
 	end
 	local function setFromX(x, fire)
@@ -757,8 +1003,31 @@ function SectionMethods:AddSlider(titleValue, initial, minValue, maxValue, suffi
 	function control:Set(nextValue)
 		apply(nextValue, false)
 	end
+	function control:SetValue(nextValue)
+		apply(nextValue, false)
+	end
+	function control:SetMin(nextValue)
+		minValue = tonumber(nextValue) or minValue
+		if maxValue <= minValue then
+			maxValue = minValue + 1
+		end
+		apply(value, false)
+	end
+	function control:SetMax(nextValue)
+		maxValue = tonumber(nextValue) or maxValue
+		if maxValue <= minValue then
+			minValue = maxValue - 1
+		end
+		apply(value, false)
+	end
 	function control:Get()
 		return value
+	end
+	function control:OnChanged(fn)
+		if type(fn) == "function" then
+			self.Callbacks[#self.Callbacks + 1] = fn
+		end
+		return self
 	end
 	apply(value, false)
 	track(self.Window, bar.InputBegan:Connect(function(input)
@@ -911,5 +1180,8 @@ end
 
 UniversalUI.makeStatus = makeStatus
 UniversalUI.resolveParent = resolveParent
+UniversalUI.safeCall = safeCall
+UniversalUI.safeFireServer = safeFireServer
+UniversalUI.RuntimeMethods = RuntimeMethods
 
 return UniversalUI

@@ -149,36 +149,32 @@ end))
 
 math.randomseed(tick())
 
--- Load Obsidian UI
 Library = loadstring(game:HttpGet(
-    "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"
+    "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/universal_ui.lua"
 ))()
 
-Win = Library:CreateWindow({
-    Title = "Auto Tycoon with Smart Rebirth + ETA",
-    ToggleKeybind = Enum.KeyCode.RightControl,
-    Center = true,
-    AutoShow = true
+Win = Library.new({
+    Name = "AutoTycoonSmartRebirth",
+    Title = "Auto Tycoon",
+    Subtitle = "SMART REBIRTH ONLINE",
+    ThemeName = "NationBrain",
+    ToggleKey = Enum.KeyCode.RightControl,
+    Size = UDim2.fromOffset(760, 500),
+    Position = UDim2.new(0.5, -380, 0.5, -250)
 })
-local Tab = Win:AddTab("Main", "home")
-local Controls = Tab:AddLeftGroupbox("Controls")
-local StatsPanel = Tab:AddLeftGroupbox("Rebirth & ETA")
 
-local TglButtons = Controls:AddToggle("AutoBtns", {Text = "Auto Buttons", Default = false})
-local TglDebris = Controls:AddToggle("AutoDebris", {Text = "Auto Collect Debris", Default = false})
-local TglCollect = Controls:AddToggle("AutoCollectResize", {Text = "CollectZone Resizer", Default = false})
-local TglWeather = Controls:AddToggle("AutoWeather", {Text = "Auto Weather Skip", Default = false})
+local Tab = Win:AddTab("Main", "[]")
+local Controls = Tab:AddSection("Controls")
+local StatsPanel = Tab:AddSection("Rebirth & ETA")
 
--- Stats UI
-local AvgTimeLabel = StatsPanel:AddLabel("Average Rebirth: Calculating...")
-local TargetSlider = StatsPanel:AddSlider("TargetRebirth", {
-    Text = "Target Rebirth",
-    Default = 1,
-    Min = 1,
-    Max = 1000,
-    Rounding = 1
-})
-local ETALabel = StatsPanel:AddLabel("ETA: Calculating...")
+local TglButtons = Controls:AddToggle("Auto Buttons", false)
+local TglDebris = Controls:AddToggle("Auto Collect Debris", false)
+local TglCollect = Controls:AddToggle("CollectZone Resizer", false)
+local TglWeather = Controls:AddToggle("Auto Weather Skip", false)
+
+local AvgTimeLabel = StatsPanel:AddStatus("Average Rebirth", "Calculating...")
+local TargetSlider = StatsPanel:AddSlider("Target Rebirth", 1, 1, 1000, "")
+local ETALabel = StatsPanel:AddStatus("ETA", "Calculating...")
 
 local running, debrisOn, collectResizerOn, autoWeatherOn = false, false, false, false
 local busy, rebirthing = false, false
@@ -369,7 +365,7 @@ local function skipWeatherEvent()
             local remote = getRemoteEvents():FindFirstChild("SkipEvent")
             if remote then
                 remote:FireServer()
-                Library:Notify({
+                Win:Notify({
                     Title = "Auto Weather Skip",
                     Description = string.format("Skipped weather: %s (%d seconds left)", eventName and eventName.Value or "Unknown", timer.Value),
                     Time = 3
@@ -446,7 +442,7 @@ local function doRebirth()
             end
             if #candidates > 0 then
                 local chosen = candidates[math.random(#candidates)]
-                Library:Notify({
+                Win:Notify({
                     Title = "Auto Rebirth",
                     Description = string.format("Chose element '%s' (Mastery: %d)", chosen, lowestValue),
                     Time = 3
@@ -454,7 +450,7 @@ local function doRebirth()
                 invokeRemote(remoteEvents, "ElementCallback", chosen)
                 invokeRemote(remoteEvents, "PickCallback")
             else
-                Library:Notify({
+                Win:Notify({
                     Title = "Auto Rebirth",
                     Description = "No mastery elements ≥ 0 found!",
                     Time = 3
@@ -462,7 +458,7 @@ local function doRebirth()
                 invokeRemote(remoteEvents, "PickCallback")
             end
         else
-            Library:Notify({
+            Win:Notify({
                 Title = "Auto Rebirth",
                 Description = "Mastery folder not found!",
                 Time = 3
@@ -472,7 +468,7 @@ local function doRebirth()
     end)
 
     if not ok then
-        Library:Notify({
+        Win:Notify({
             Title = "Auto Rebirth",
             Description = "Rebirth failed: " .. tostring(err),
             Time = 5
@@ -524,7 +520,7 @@ task.spawn(function()
                         end
                         updateStatsUI()
                     end
-                    Library:Notify({
+                    Win:Notify({
                         Title = "Auto Rebirth",
                         Description = string.format("Cycle complete in %.2fs (%d buttons)", cycleTime, buttonPressCount),
                         Time = 3
