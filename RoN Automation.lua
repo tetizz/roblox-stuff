@@ -524,11 +524,17 @@ local function computeUnitsFromNet(netIncome, unitSellPrice)
 end
 
 local function sendTrade(target, resource, units, mode)
-	ManageAlliance:FireServer(
-		target,
-		"ResourceTrade",
-		{ resource, mode or "Sell", units, 1, "Trade" }
-	)
+	local ok, err = pcall(function()
+		ManageAlliance:FireServer(
+			target,
+			"ResourceTrade",
+			{ resource, mode or "Sell", units, 1, "Trade" }
+		)
+	end)
+	if not ok then
+		debugPrint("[Remote]", "Trade send failed", target, resource, tostring(err))
+	end
+	return ok, err
 end
 
 local function tradeExists(myCountry, resource, targetName)
@@ -790,11 +796,17 @@ local function buildAISuppliers(myCountry, resourceName, playerSet)
 end
 
 local function sendBuy(targetCountry, resourceName, amount)
-	ManageAlliance:FireServer(
-		targetCountry,
-		"ResourceTrade",
-		{ resourceName, "Buy", amount, 1, "Trade" }
-	)
+	local ok, err = pcall(function()
+		ManageAlliance:FireServer(
+			targetCountry,
+			"ResourceTrade",
+			{ resourceName, "Buy", amount, 1, "Trade" }
+		)
+	end)
+	if not ok then
+		debugPrint("[Remote]", "Buy send failed", targetCountry, resourceName, tostring(err))
+	end
+	return ok, err
 end
 
 local function attemptResupplyResource(myCountry, resourceName, delta, playerSet, statusOut)
@@ -811,23 +823,29 @@ local function attemptResupplyResource(myCountry, resourceName, delta, playerSet
 			local amt = math.min(remaining, s.flow)
 			if amt > 0 then
 				local supplierName = s.name
-				sendBuy(supplierName, resourceName, amt)
+				local sent, sendErr = sendBuy(supplierName, resourceName, amt)
 				tradesSent = tradesSent + 1
+				if sent then
+					-- After a delay, if trade entry is not present, pause that supplier/resource briefly.
+					task.delay(Resupply.CheckDelay, function()
+						if not Runtime.Alive then
+							return
+						end
 
-				-- After a delay, if trade entry is not present, pause that supplier/resource briefly.
-				task.delay(Resupply.CheckDelay, function()
-					if not Runtime.Alive then
-						return
+						local ok2, myCountry2 = assertStillLeader()
+						if not ok2 then return end
+						if not hasTradePartner(myCountry2, resourceName, supplierName) then
+							setResupplySupplierCooldown(supplierName, resourceName)
+						end
+					end)
+
+					remaining = remaining - amt
+				else
+					setResupplySupplierCooldown(supplierName, resourceName)
+					if statusOut then
+						statusOut[#statusOut + 1] = resourceName .. " failed=" .. supplierName .. " err=" .. tostring(sendErr)
 					end
-
-					local ok2, myCountry2 = assertStillLeader()
-					if not ok2 then return end
-					if not hasTradePartner(myCountry2, resourceName, supplierName) then
-						setResupplySupplierCooldown(supplierName, resourceName)
-					end
-				end)
-
-				remaining = remaining - amt
+				end
 			end
 		end
 	end
@@ -1615,7 +1633,15 @@ local function attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeV
 	local pendingKey = cooldownKey(pick.name, CONFIG.TradeResource)
 	PendingAttempts[pendingKey] = true
 
-	sendTrade(pick.name, CONFIG.TradeResource, pick.units, "Sell")
+	local sent, sendErr = sendTrade(pick.name, CONFIG.TradeResource, pick.units, "Sell")
+	if not sent then
+		PendingAttempts[pendingKey] = nil
+		setCooldown(pick.name, CONFIG.TradeResource)
+		if TradeAttemptingLabel then
+			TradeAttemptingLabel:SetText("Attempting to trade: (send failed: " .. tostring(sendErr) .. ")")
+		end
+		return
+	end
 	debugPrint("[AutoTrade]", "Attempted", pick.units, CONFIG.TradeResource, "to", pick.name, "(net:", pick.net .. ")")
 
 	task.delay(CONFIG.TradeAttemptCheckDelay, function()
