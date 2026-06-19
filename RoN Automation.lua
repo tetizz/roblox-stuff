@@ -816,6 +816,10 @@ local function attemptResupplyResource(myCountry, resourceName, delta, playerSet
 
 				-- After a delay, if trade entry is not present, pause that supplier/resource briefly.
 				task.delay(Resupply.CheckDelay, function()
+					if not Runtime.Alive then
+						return
+					end
+
 					local ok2, myCountry2 = assertStillLeader()
 					if not ok2 then return end
 					if not hasTradePartner(myCountry2, resourceName, supplierName) then

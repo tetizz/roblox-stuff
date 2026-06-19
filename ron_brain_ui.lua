@@ -2,7 +2,7 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-19.3"
+BrainUI.Version = "2026-06-19.4"
 BrainUI.UniversalUIVersion = "2026-06-19.2"
 
 local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/07ad44f8d70b7c698cdaa2cec76024bea5a23c21/universal_ui.lua"
@@ -233,6 +233,16 @@ local function wrapStatus(text)
 		end
 	end
 	return obj
+end
+
+local function runUICallback(callback, ...)
+	if not callback then
+		return
+	end
+	local ok, err = pcall(callback, ...)
+	if not ok then
+		warn("[RoN Nation Brain] UI callback failed:", tostring(err))
+	end
 end
 
 local function bindStatus(parent, y, title, obj)
@@ -661,7 +671,9 @@ local function makeButton(parent, text, pos, size, callback)
 	})
 	corner(button, 6)
 	stroke(button, Color3.fromRGB(47, 111, 179), 0.15, 1)
-	button.MouseButton1Click:Connect(callback)
+	button.MouseButton1Click:Connect(function()
+		runUICallback(callback)
+	end)
 	return button
 end
 
@@ -684,7 +696,7 @@ local function makeToggle(parent, y, text, value, callback)
 		value = not value
 		button.BackgroundColor3 = value and C.green or Color3.fromRGB(42, 51, 61)
 		button.Text = value and "ON" or "OFF"
-		callback(value)
+		runUICallback(callback, value)
 	end)
 	return y + 52
 end
@@ -736,7 +748,7 @@ local function makeDropdown(parent, y, text, values, current, callback)
 			current = value
 			button.Text = tostring(value)
 			list.Visible = false
-			callback(value)
+			runUICallback(callback, value)
 		end)
 	end
 	button.MouseButton1Click:Connect(function()
@@ -765,7 +777,7 @@ local function makeSlider(parent, y, text, value, min, max, suffix, callback)
 	})
 	corner(fill, 4)
 	local dragging = false
-	local function setFromAlpha(alpha)
+	local function setFromAlpha(alpha, fire)
 		alpha = clamp(alpha, 0, 1)
 		local nextValue = min + (max - min) * alpha
 		if max - min > 20 then
@@ -776,18 +788,20 @@ local function makeSlider(parent, y, text, value, min, max, suffix, callback)
 		value = nextValue
 		fill.Size = UDim2.new((value - min) / (max - min), 0, 1, 0)
 		valueLabel.Text = tostring(value) .. (suffix or "")
-		callback(value)
+		if fire then
+			runUICallback(callback, value)
+		end
 	end
-	setFromAlpha((value - min) / (max - min))
+	setFromAlpha((value - min) / (max - min), false)
 	trackPageConnection(bar.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
-			setFromAlpha((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X)
+			setFromAlpha((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, true)
 		end
 	end))
 	trackPageConnection(UserInputService.InputChanged:Connect(function(input)
 		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-			setFromAlpha((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X)
+			setFromAlpha((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, true)
 		end
 	end))
 	trackPageConnection(UserInputService.InputEnded:Connect(function(input)
