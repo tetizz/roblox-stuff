@@ -86,7 +86,7 @@ local CitiesRoot = waitRequired(Baseplate, "Cities")
 
 local Units = waitRequired(workspace, "Units")
 
--- Fast refs like your old scripts
+-- Cached method refs used by high-frequency scans.
 local GetChildren = game.GetChildren
 local FirstChild = game.FindFirstChild
 
@@ -94,7 +94,7 @@ local FirstChild = game.FindFirstChild
 -- CONFIG
 --============================================================
 local CONFIG = {
-	Debug = true,
+	Debug = false,
 
 	-- Auto Trade (separate tab)
 	TradeEnabled = false,
@@ -163,6 +163,11 @@ local function safeNotify(title, text, duration)
 end
 
 local function safeFireServer(label, remote, ...)
+	if not remote or type(remote.FireServer) ~= "function" then
+		debugPrint("[Remote]", tostring(label) .. " missing FireServer")
+		return false, "missing FireServer"
+	end
+
 	local args = { ... }
 	local ok, err = pcall(function()
 		remote:FireServer(unpack(args))
@@ -217,6 +222,72 @@ local function getObjectValue(obj)
 	end
 end
 
+local function addIdentity(set, value)
+	if value == nil then
+		return
+	end
+
+	set[value] = true
+	local text = tostring(value)
+	if text ~= "" then
+		set[text] = true
+	end
+end
+
+local function addInstanceIdentities(set, inst)
+	if typeof(inst) ~= "Instance" then
+		return
+	end
+
+	local okName, name = pcall(function()
+		return inst.Name
+	end)
+	if okName then
+		addIdentity(set, name)
+	end
+
+	local okDisplay, displayName = pcall(function()
+		return inst.DisplayName
+	end)
+	if okDisplay then
+		addIdentity(set, displayName)
+	end
+
+	local okUserId, userId = pcall(function()
+		return inst.UserId
+	end)
+	if okUserId then
+		addIdentity(set, userId)
+	end
+end
+
+local function valueMatchesIdentitySet(value, set)
+	if not set or value == nil then
+		return false
+	end
+
+	if set[value] then
+		return true
+	end
+
+	local text = tostring(value)
+	if text ~= "" and set[text] then
+		return true
+	end
+
+	if typeof(value) == "Instance" then
+		local candidates = {}
+		addInstanceIdentities(candidates, value)
+		for candidate in pairs(candidates) do
+			if set[candidate] then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
 --============================================================
 -- Leader detection (robust) + AI detection
 --============================================================
@@ -243,15 +314,14 @@ local function getMyCountryFolder()
 		return CountryCache.Folder
 	end
 
-	local name = LocalPlayer.Name
-	local display = LocalPlayer.DisplayName
-	local userId = tostring(LocalPlayer.UserId)
+	local localIdentitySet = {}
+	addIdentity(localIdentitySet, LocalPlayer)
+	addInstanceIdentities(localIdentitySet, LocalPlayer)
 
 	for _, country in ipairs(CountryData:GetChildren()) do
 		local leader = country:FindFirstChild("Leader")
 		if leader then
-			local v = tostring(getObjectValue(leader))
-			if v == name or v == display or v == userId then
+			if valueMatchesIdentitySet(getObjectValue(leader), localIdentitySet) then
 				CountryCache.CheckedAt = t
 				CountryCache.Folder = country
 				return country
@@ -278,9 +348,8 @@ local function buildPlayerIdentitySet()
 
 	local set = {}
 	for _, p in ipairs(Players:GetPlayers()) do
-		set[p.Name] = true
-		set[p.DisplayName] = true
-		set[tostring(p.UserId)] = true
+		addIdentity(set, p)
+		addInstanceIdentities(set, p)
 	end
 	PlayerIdentityCache.Set = set
 	PlayerIdentityCache.Dirty = false
@@ -293,16 +362,18 @@ local function isCountryAI(country, playerSet)
 		return true
 	end
 
-	local s = tostring(getObjectValue(leader) or "")
-	if s:find("AI") then
-		return true
-	end
-	if s ~= "" and country.Name and s:lower():find(country.Name:lower(), 1, true) then
-		return true
+	local value = getObjectValue(leader)
+	if valueMatchesIdentitySet(value, playerSet) then
+		return false
 	end
 
-	if playerSet and playerSet[s] then
-		return false
+	local s = tostring(value or "")
+	local lower = s:lower()
+	if lower:find("ai", 1, true) then
+		return true
+	end
+	if s ~= "" and country.Name and lower:find(country.Name:lower(), 1, true) then
+		return true
 	end
 
 	return true
@@ -475,7 +546,7 @@ local function getUnitSellPrice(resource)
 	end
 end
 
--- Net income rule: Revenue total − Expenses total
+-- Net income rule: revenue total minus expense total.
 local function getRevenueTotalValue(country)
 	local econ = country:FindFirstChild("Economy")
 	if not econ then return end
@@ -997,7 +1068,7 @@ end
 local JustWatch = {
 	NotifiedDone = {}, -- key = myCountry|target
 	NotifiedStarted = {}, -- [countryName][target] = true
-	NotifiedThreats = {}, -- [countryName] = true when targeting you
+	NotifiedThreats = {}, -- [countryName] = true when targeting local country
 	LastStatus = "Idle"
 }
 
@@ -1296,7 +1367,7 @@ local function doAutoPeace()
 end
 
 --============================================================
--- Auto Promote (dynamic leaders in Leaders.Current, your country auto-detected)
+-- Auto Promote (dynamic leaders in Leaders.Current, local country auto-detected)
 -- Promotes any leader with attribute Corrupt == true if:
 -- my Political X > 2 * strongest opponent Political X
 --============================================================
@@ -1627,7 +1698,7 @@ local function attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeV
 			pick = c
 			break
 		end
-		-- your rule: if exceeds flow limit skip and move on to next
+		-- If the flow limit blocks this candidate, try the next one.
 		blockedReason = reason
 	end
 
@@ -2126,7 +2197,7 @@ task.spawn(function()
 			end)
 		end
 
-		-- Auto Build (don’t hog)
+		-- Auto Build (light scheduler cadence)
 		if CONFIG.AutoBuildEnabled then
 			runEvery("auto_build", 0.45, function()
 				AutoBuildStatusLabel:SetText("Auto Build: Running")

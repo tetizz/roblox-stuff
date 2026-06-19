@@ -112,7 +112,7 @@ end
 local function checkWhitelist()
     for _, player in ipairs(Players:GetPlayers()) do
         if not whitelist[player.UserId] then
-            plr:Kick("A non-whitelisted player is in the game. Script stopped for your safety.")
+            plr:Kick("A non-whitelisted player is in the game. Script stopped by whitelist guard.")
             return true
         end
     end
@@ -123,7 +123,7 @@ if checkWhitelist() then return end
 
 trackRuntimeConnection(Players.PlayerAdded:Connect(function(newPlayer)
     if not whitelist[newPlayer.UserId] then
-        plr:Kick("A non-whitelisted player joined the game. Script stopped for your safety.")
+        plr:Kick("A non-whitelisted player joined the game. Script stopped by whitelist guard.")
     end
 end))
 
