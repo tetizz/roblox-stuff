@@ -115,17 +115,30 @@ end
 -- Simple scheduler (streamlines loops)
 --============================================================
 local Scheduler = {
-	Last = {}
+	Last = {},
+	Errors = {},
+	LastWarn = {}
 }
 
 local function runEvery(key, interval, fn)
 	local t = now()
+	interval = tonumber(interval) or 1
 	local last = Scheduler.Last[key]
 	if last and (t - last) < interval then
 		return
 	end
 	Scheduler.Last[key] = t
-	fn()
+	local ok, err = pcall(fn)
+	if ok then
+		Scheduler.Errors[key] = nil
+		return
+	end
+
+	Scheduler.Errors[key] = (Scheduler.Errors[key] or 0) + 1
+	if not Scheduler.LastWarn[key] or (t - Scheduler.LastWarn[key]) > 10 then
+		Scheduler.LastWarn[key] = t
+		warn("[RoN Nation Brain] scheduler task failed:", tostring(key), tostring(err))
+	end
 end
 
 local function getObjectValue(obj)
@@ -247,6 +260,12 @@ local CitiesCache = {
 	CheckedAt = 0
 }
 
+local CityPresenceCache = {
+	Folder = {},
+	HasCities = {},
+	CheckedAt = {}
+}
+
 local function getAllMyCitiesSorted(forceRefresh)
 	local ok, myCountry = assertStillLeader()
 	if not ok then
@@ -284,11 +303,29 @@ local function getAllMyCitiesSorted(forceRefresh)
 end
 
 local function countryHasAtLeastOneCity(countryName)
-	local folder = CitiesRoot:FindFirstChild(countryName)
-	if not folder then
+	if type(countryName) ~= "string" or countryName == "" then
 		return false
 	end
-	return #folder:GetChildren() >= 1
+
+	local folder = CitiesRoot:FindFirstChild(countryName)
+	if not folder then
+		CityPresenceCache.Folder[countryName] = nil
+		CityPresenceCache.HasCities[countryName] = nil
+		CityPresenceCache.CheckedAt[countryName] = nil
+		return false
+	end
+
+	local t = now()
+	local checkedAt = CityPresenceCache.CheckedAt[countryName]
+	if CityPresenceCache.Folder[countryName] == folder and checkedAt and (t - checkedAt) < 2 then
+		return CityPresenceCache.HasCities[countryName] == true
+	end
+
+	local hasCities = #folder:GetChildren() >= 1
+	CityPresenceCache.Folder[countryName] = folder
+	CityPresenceCache.HasCities[countryName] = hasCities
+	CityPresenceCache.CheckedAt[countryName] = t
+	return hasCities
 end
 
 --============================================================
