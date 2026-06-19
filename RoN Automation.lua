@@ -1583,7 +1583,8 @@ local function attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeV
 		return
 	end
 
-	local price = getUnitSellPrice(CONFIG.TradeResource)
+	local resourceName = CONFIG.TradeResource
+	local price = getUnitSellPrice(resourceName)
 	if not price then
 		if TradeAttemptingLabel then
 			TradeAttemptingLabel:SetText("Attempting to trade: (no price)")
@@ -1594,7 +1595,7 @@ local function attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeV
 		return
 	end
 
-	local candidates = getValidCandidates(myCountry, CONFIG.TradeResource, price)
+	local candidates = getValidCandidates(myCountry, resourceName, price)
 
 	local namesOnly = {}
 	for i = 1, #candidates do
@@ -1610,7 +1611,7 @@ local function attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeV
 
 	for i = 1, #candidates do
 		local c = candidates[i]
-		local allowed, reason = isTradeAllowedByFlow(myCountry, CONFIG.TradeResource, c.units)
+		local allowed, reason = isTradeAllowedByFlow(myCountry, resourceName, c.units)
 		if allowed then
 			pick = c
 			break
@@ -1627,22 +1628,22 @@ local function attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeV
 	end
 
 	if TradeAttemptingLabel then
-		TradeAttemptingLabel:SetText("Attempting to trade " .. tostring(pick.units) .. " " .. tostring(CONFIG.TradeResource) .. " to " .. tostring(pick.name))
+		TradeAttemptingLabel:SetText("Attempting to trade " .. tostring(pick.units) .. " " .. tostring(resourceName) .. " to " .. tostring(pick.name))
 	end
 
-	local pendingKey = cooldownKey(pick.name, CONFIG.TradeResource)
+	local pendingKey = cooldownKey(pick.name, resourceName)
 	PendingAttempts[pendingKey] = true
 
-	local sent, sendErr = sendTrade(pick.name, CONFIG.TradeResource, pick.units, "Sell")
+	local sent, sendErr = sendTrade(pick.name, resourceName, pick.units, "Sell")
 	if not sent then
 		PendingAttempts[pendingKey] = nil
-		setCooldown(pick.name, CONFIG.TradeResource)
+		setCooldown(pick.name, resourceName)
 		if TradeAttemptingLabel then
 			TradeAttemptingLabel:SetText("Attempting to trade: (send failed: " .. tostring(sendErr) .. ")")
 		end
 		return
 	end
-	debugPrint("[AutoTrade]", "Attempted", pick.units, CONFIG.TradeResource, "to", pick.name, "(net:", pick.net .. ")")
+	debugPrint("[AutoTrade]", "Attempted", pick.units, resourceName, "to", pick.name, "(net:", pick.net .. ")")
 
 	task.delay(CONFIG.TradeAttemptCheckDelay, function()
 		if not Runtime.Alive then
@@ -1656,11 +1657,11 @@ local function attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeV
 			return
 		end
 
-		local accepted = tradeExists(myCountry2, CONFIG.TradeResource, pick.name)
+		local accepted = tradeExists(myCountry2, resourceName, pick.name)
 		if accepted then
-			clearCooldown(pick.name, CONFIG.TradeResource)
+			clearCooldown(pick.name, resourceName)
 		else
-			setCooldown(pick.name, CONFIG.TradeResource)
+			setCooldown(pick.name, resourceName)
 		end
 
 		PendingAttempts[pendingKey] = nil
