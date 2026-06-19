@@ -48,16 +48,37 @@ local function trackRuntimeConnection(conn)
     return conn
 end
 
+local function warnThrottled(label, ...)
+    local t = tick()
+    if not Runtime.LastWarn[label] or (t - Runtime.LastWarn[label]) > 10 then
+        Runtime.LastWarn[label] = t
+        warn("[Tycoon Automation]", tostring(label), ...)
+    end
+end
+
 local function safeRun(label, fn)
     local ok, err = pcall(fn)
     if ok then return true end
 
-    local t = tick()
-    if not Runtime.LastWarn[label] or (t - Runtime.LastWarn[label]) > 10 then
-        Runtime.LastWarn[label] = t
-        warn("[Tycoon Automation]", tostring(label), tostring(err))
-    end
+    warnThrottled(label, tostring(err))
     return false
+end
+
+local function safeWaitForChild(parent, childName, timeout)
+    if not parent then
+        warnThrottled("wait " .. tostring(childName), "missing parent")
+        return nil
+    end
+
+    local ok, result = pcall(function()
+        return parent:WaitForChild(childName, timeout or 5)
+    end)
+    if ok and result then
+        return result
+    end
+
+    warnThrottled("wait " .. tostring(childName), tostring(childName) .. " unavailable")
+    return nil
 end
 
 if _G then
@@ -81,7 +102,10 @@ if _G then
 end
 
 local function getRemoteEvents()
-    RemoteEvents = RemoteEvents or ReplicatedStorage:WaitForChild("RemoteEvents")
+    if RemoteEvents and RemoteEvents.Parent then
+        return RemoteEvents
+    end
+    RemoteEvents = safeWaitForChild(ReplicatedStorage, "RemoteEvents", 8)
     return RemoteEvents
 end
 
@@ -307,11 +331,11 @@ end
 local char, hrp
 if plr.Character then
     char = plr.Character
-    hrp = char:WaitForChild("HumanoidRootPart")
+    hrp = safeWaitForChild(char, "HumanoidRootPart", 5)
 end
 trackRuntimeConnection(plr.CharacterAdded:Connect(function(c)
     char = c
-    hrp = c:WaitForChild("HumanoidRootPart")
+    hrp = safeWaitForChild(c, "HumanoidRootPart", 5)
 end))
 
 -- Function to bring button near player and trigger it using ProximityPrompt
@@ -362,7 +386,8 @@ local function skipWeatherEvent()
         local timer = evObj:FindFirstChild("Timer")
         local eventName = evObj:FindFirstChild("EventDisplayName")
         if timer and timer.Value > 0 then
-            local remote = getRemoteEvents():FindFirstChild("SkipEvent")
+            local remoteEvents = getRemoteEvents()
+            local remote = remoteEvents and remoteEvents:FindFirstChild("SkipEvent")
             if remote then
                 if Library.safeFireServer("SkipEvent", remote) then
                     Win:Notify({
