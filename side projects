@@ -18,6 +18,44 @@ local TeleportService = game:GetService("TeleportService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local plr = Players.LocalPlayer
 local RemoteEvents
+local collectResizerThread
+
+local RuntimeCleanupKey = "TycoonAutomationRuntimeCleanup"
+if _G and type(_G[RuntimeCleanupKey]) == "function" then
+    pcall(_G[RuntimeCleanupKey])
+end
+
+local Runtime = {
+    Alive = true,
+    Connections = {}
+}
+
+local function disconnectRuntimeConnections()
+    for _, conn in ipairs(Runtime.Connections) do
+        if conn and conn.Disconnect then
+            pcall(function()
+                conn:Disconnect()
+            end)
+        end
+    end
+    Runtime.Connections = {}
+end
+
+local function trackRuntimeConnection(conn)
+    Runtime.Connections[#Runtime.Connections + 1] = conn
+    return conn
+end
+
+if _G then
+    _G[RuntimeCleanupKey] = function()
+        Runtime.Alive = false
+        disconnectRuntimeConnections()
+        if collectResizerThread then
+            task.cancel(collectResizerThread)
+            collectResizerThread = nil
+        end
+    end
+end
 
 local function getRemoteEvents()
     RemoteEvents = RemoteEvents or ReplicatedStorage:WaitForChild("RemoteEvents")
@@ -36,11 +74,11 @@ end
 
 if checkWhitelist() then return end
 
-Players.PlayerAdded:Connect(function(newPlayer)
+trackRuntimeConnection(Players.PlayerAdded:Connect(function(newPlayer)
     if not whitelist[newPlayer.UserId] then
         plr:Kick("A non-whitelisted player joined the game. Script stopped for your safety.")
     end
-end)
+end))
 
 -- Anti-AFK Setup
 local function antiAFK(nonotify)
@@ -55,10 +93,10 @@ local function antiAFK(nonotify)
         end
     else
         local VirtualUser = cloneref(game:GetService("VirtualUser"))
-        plr.Idled:Connect(function()
+        trackRuntimeConnection(plr.Idled:Connect(function()
             VirtualUser:CaptureController()
             VirtualUser:ClickButton2(Vector2.new())
-        end)
+        end))
     end
     if not nonotify then
         -- Optional notify here
@@ -78,9 +116,9 @@ local function rejoin()
     end
 end
 
-GuiService.ErrorMessageChanged:Connect(function()
+trackRuntimeConnection(GuiService.ErrorMessageChanged:Connect(function()
     rejoin()
-end)
+end))
 
 math.randomseed(tick())
 
@@ -219,10 +257,10 @@ if plr.Character then
     char = plr.Character
     hrp = char:WaitForChild("HumanoidRootPart")
 end
-plr.CharacterAdded:Connect(function(c)
+trackRuntimeConnection(plr.CharacterAdded:Connect(function(c)
     char = c
     hrp = c:WaitForChild("HumanoidRootPart")
-end)
+end))
 
 -- Function to bring button near player and trigger it using ProximityPrompt
 local function bringBtnAndTrigger(inst)
@@ -285,7 +323,6 @@ local function skipWeatherEvent()
     end
 end
 
-local collectResizerThread
 local function resizeMyCollectZone()
     if collectResizerThread then
         task.cancel(collectResizerThread)
@@ -298,11 +335,12 @@ local function resizeMyCollectZone()
             task.wait(0.2)
             local tf = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Tycoons")
             myTycoon = tf and tf:FindFirstChild(plr.Name)
-        until myTycoon
+        until myTycoon or not Runtime.Alive or not collectResizerOn
+        if not Runtime.Alive or not collectResizerOn then return end
         local baseSize = Vector3.new(2000, 2000, 2000)
         local delta = Vector3.new(1, 1, 1)
         local flip = false
-        while collectResizerOn do
+        while Runtime.Alive and collectResizerOn do
             myTycoon = Workspace.Map.Tycoons:FindFirstChild(plr.Name)
             if myTycoon then
                 local cz = myTycoon:FindFirstChild("T_Collect_Zone") and myTycoon.T_Collect_Zone:FindFirstChild("CollectZone")
@@ -316,51 +354,76 @@ local function resizeMyCollectZone()
     end)
 end
 
+local function invokeRemote(remoteEvents, name, ...)
+    local remote = remoteEvents and remoteEvents:FindFirstChild(name)
+    if not remote then
+        error(name .. " missing")
+    end
+    return remote:InvokeServer(...)
+end
+
 local function doRebirth()
+    if rebirthing or not Runtime.Alive then return end
     rebirthing = true
-    local remoteEvents = getRemoteEvents()
-    remoteEvents.RebirthCallback:InvokeServer(plr)
-    task.wait(2)
-    local masteryFolder = plr:WaitForChild("PlayerData"):FindFirstChild("Mastery")
-    if masteryFolder then
-        local lowestValue = math.huge
-        local candidates = {}
-        for _, elem in ipairs(masteryFolder:GetChildren()) do
-            if typeof(elem.Value) == "number" and elem.Value >= 0 then
-                if elem.Value < lowestValue then
-                    lowestValue = elem.Value
-                    candidates = {elem.Name}
-                elseif elem.Value == lowestValue then
-                    table.insert(candidates, elem.Name)
+
+    local ok, err = pcall(function()
+        local remoteEvents = getRemoteEvents()
+        invokeRemote(remoteEvents, "RebirthCallback", plr)
+        task.wait(2)
+        if not Runtime.Alive then return end
+
+        local playerData = plr:WaitForChild("PlayerData", 5)
+        local masteryFolder = playerData and playerData:FindFirstChild("Mastery")
+        if masteryFolder then
+            local lowestValue = math.huge
+            local candidates = {}
+            for _, elem in ipairs(masteryFolder:GetChildren()) do
+                local value = elem:IsA("ValueBase") and elem.Value
+                if typeof(value) == "number" and value >= 0 then
+                    if value < lowestValue then
+                        lowestValue = value
+                        candidates = {elem.Name}
+                    elseif value == lowestValue then
+                        table.insert(candidates, elem.Name)
+                    end
                 end
             end
-        end
-        if #candidates > 0 then
-            local chosen = candidates[math.random(#candidates)]
-            Library:Notify({
-                Title = "Auto Rebirth",
-                Description = string.format("Chose element '%s' (Mastery: %d)", chosen, lowestValue),
-                Time = 3
-            })
-            remoteEvents.ElementCallback:InvokeServer(chosen)
-            remoteEvents.PickCallback:InvokeServer()
+            if #candidates > 0 then
+                local chosen = candidates[math.random(#candidates)]
+                Library:Notify({
+                    Title = "Auto Rebirth",
+                    Description = string.format("Chose element '%s' (Mastery: %d)", chosen, lowestValue),
+                    Time = 3
+                })
+                invokeRemote(remoteEvents, "ElementCallback", chosen)
+                invokeRemote(remoteEvents, "PickCallback")
+            else
+                Library:Notify({
+                    Title = "Auto Rebirth",
+                    Description = "No mastery elements ≥ 0 found!",
+                    Time = 3
+                })
+                invokeRemote(remoteEvents, "PickCallback")
+            end
         else
             Library:Notify({
                 Title = "Auto Rebirth",
-                Description = "No mastery elements ≥ 0 found!",
+                Description = "Mastery folder not found!",
                 Time = 3
             })
-            remoteEvents.PickCallback:InvokeServer()
+            invokeRemote(remoteEvents, "PickCallback")
         end
-    else
+    end)
+
+    if not ok then
         Library:Notify({
             Title = "Auto Rebirth",
-            Description = "Mastery folder not found!",
-            Time = 3
+            Description = "Rebirth failed: " .. tostring(err),
+            Time = 5
         })
-        remoteEvents.PickCallback:InvokeServer()
     end
-    if collectResizerOn then resizeMyCollectZone() end
+
+    if Runtime.Alive and collectResizerOn then resizeMyCollectZone() end
     rebirthing = false
 end
 
@@ -371,7 +434,7 @@ local lastDebrisScan = 0
 local lastWeatherCheck = 0
 
 task.spawn(function()
-    while true do
+    while Runtime.Alive do
         local bpObj = plr:FindFirstChild("ButtonProgress")
         local unld = bpObj and bpObj:FindFirstChild("UnlockedButtons")
         local tot = bpObj and bpObj:FindFirstChild("TotalButtons")
@@ -411,7 +474,11 @@ task.spawn(function()
                 })
                 rebirthStarted, rebirthStartTime, lastButtonValue, buttonPressCount = false, nil, 0, 0
                 if running then doRebirth() end
-                task.delay(REBIRTH_COOLDOWN_TIME, function() rebirthCooldown = false end)
+                task.delay(REBIRTH_COOLDOWN_TIME, function()
+                    if Runtime.Alive then
+                        rebirthCooldown = false
+                    end
+                end)
             end
         end
 
@@ -449,7 +516,7 @@ end)
 TglWeather:OnChanged(function(v) autoWeatherOn = v end)
 
 task.spawn(function()
-    while true do
+    while Runtime.Alive do
         updateStatsUI()
         task.wait(4)
     end
