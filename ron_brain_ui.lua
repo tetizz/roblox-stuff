@@ -2,7 +2,7 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-19.7"
+BrainUI.Version = "2026-06-19.8"
 BrainUI.UniversalUIVersion = "2026-06-19.5"
 
 local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/91a230a534d96b30994f939c684f383896bc8c38/universal_ui.lua"
@@ -656,7 +656,7 @@ end
 
 local function makeButton(parent, text, pos, size, callback)
 	if Primitives and Primitives.button then
-		return Primitives.button(parent, text, pos, size, callback, C)
+		return Primitives.button(parent, text, pos, size, callback, C, { Connections = UI.PageConnections })
 	end
 	local button = inst("TextButton", {
 		BackgroundColor3 = Color3.fromRGB(14, 45, 76),
@@ -671,9 +671,9 @@ local function makeButton(parent, text, pos, size, callback)
 	})
 	corner(button, 6)
 	stroke(button, Color3.fromRGB(47, 111, 179), 0.15, 1)
-	button.MouseButton1Click:Connect(function()
+	trackPageConnection(button.MouseButton1Click:Connect(function()
 		runUICallback(callback)
-	end)
+	end))
 	return button
 end
 
@@ -692,12 +692,12 @@ local function makeToggle(parent, y, text, value, callback)
 		Parent = row
 	})
 	corner(button, 11)
-	button.MouseButton1Click:Connect(function()
+	trackPageConnection(button.MouseButton1Click:Connect(function()
 		value = not value
 		button.BackgroundColor3 = value and C.green or Color3.fromRGB(42, 51, 61)
 		button.Text = value and "ON" or "OFF"
 		runUICallback(callback, value)
-	end)
+	end))
 	return y + 52
 end
 
@@ -744,16 +744,16 @@ local function makeDropdown(parent, y, text, values, current, callback)
 			ZIndex = 21,
 			Parent = list
 		})
-		option.MouseButton1Click:Connect(function()
+		trackPageConnection(option.MouseButton1Click:Connect(function()
 			current = value
 			button.Text = tostring(value)
 			list.Visible = false
 			runUICallback(callback, value)
-		end)
+		end))
 	end
-	button.MouseButton1Click:Connect(function()
+	trackPageConnection(button.MouseButton1Click:Connect(function()
 		list.Visible = not list.Visible
-	end)
+	end))
 	return y + 54
 end
 
@@ -1324,9 +1324,9 @@ local function makeSidebarButton(name, y, label)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Parent = UI.Sidebar
 	})
-	button.MouseButton1Click:Connect(function()
+	trackRootConnection(button.MouseButton1Click:Connect(function()
 		switchTab(name)
-	end)
+	end))
 	UI.Buttons[name] = button
 	return button
 end
