@@ -364,12 +364,13 @@ local function skipWeatherEvent()
         if timer and timer.Value > 0 then
             local remote = getRemoteEvents():FindFirstChild("SkipEvent")
             if remote then
-                remote:FireServer()
-                Win:Notify({
-                    Title = "Auto Weather Skip",
-                    Description = string.format("Skipped weather: %s (%d seconds left)", eventName and eventName.Value or "Unknown", timer.Value),
-                    Time = 3
-                })
+                if Library.safeFireServer("SkipEvent", remote) then
+                    Win:Notify({
+                        Title = "Auto Weather Skip",
+                        Description = string.format("Skipped weather: %s (%d seconds left)", eventName and eventName.Value or "Unknown", timer.Value),
+                        Time = 3
+                    })
+                end
             end
         end
     end
@@ -408,10 +409,11 @@ end
 
 local function invokeRemote(remoteEvents, name, ...)
     local remote = remoteEvents and remoteEvents:FindFirstChild(name)
-    if not remote then
-        error(name .. " missing")
+    local results = { Library.safeInvokeServer(name, remote, ...) }
+    if not results[1] then
+        error(tostring(results[2] or (name .. " failed")))
     end
-    return remote:InvokeServer(...)
+    return unpack(results, 2)
 end
 
 local function doRebirth()

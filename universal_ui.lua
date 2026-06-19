@@ -4,7 +4,7 @@
 local UniversalUI = {}
 
 UniversalUI.Name = "Universal UI"
-UniversalUI.Version = "2026-06-19.3"
+UniversalUI.Version = "2026-06-19.4"
 
 UniversalUI.Themes = {
 	Default = {
@@ -268,6 +268,21 @@ local function safeFireServer(label, remote, ...)
 	return ok, err
 end
 
+local function safeInvokeServer(label, remote, ...)
+	if not remote or type(remote.InvokeServer) ~= "function" then
+		warn("[UniversalUI]", tostring(label or "remote"), "missing InvokeServer")
+		return false, "missing InvokeServer"
+	end
+	local args = { ... }
+	local results = { pcall(function()
+		return remote:InvokeServer(unpack(args))
+	end) }
+	if not results[1] then
+		warn("[UniversalUI]", tostring(label or "remote"), tostring(results[2]))
+	end
+	return unpack(results)
+end
+
 local function disconnectConnections(list)
 	for _, conn in ipairs(list or {}) do
 		if conn and conn.Disconnect then
@@ -314,7 +329,8 @@ UniversalUI.Primitives = {
 	mergeTheme = mergeTheme,
 	disconnectConnections = disconnectConnections,
 	safeCall = safeCall,
-	safeFireServer = safeFireServer
+	safeFireServer = safeFireServer,
+	safeInvokeServer = safeInvokeServer
 }
 
 local function makeStatus(initial)
@@ -1182,6 +1198,7 @@ UniversalUI.makeStatus = makeStatus
 UniversalUI.resolveParent = resolveParent
 UniversalUI.safeCall = safeCall
 UniversalUI.safeFireServer = safeFireServer
+UniversalUI.safeInvokeServer = safeInvokeServer
 UniversalUI.RuntimeMethods = RuntimeMethods
 
 return UniversalUI
