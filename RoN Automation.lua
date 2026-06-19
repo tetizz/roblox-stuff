@@ -1,5 +1,4 @@
 -- Rise of Nations - Auto Trade (separate) + Automations (Build/Resupply/Watcher/Justify/Tags/Promote)
--- Preferred formatting: one space around =
 
 --============================================================
 -- RoN Nation Brain UI
@@ -214,7 +213,7 @@ local function isCountryAI(country, playerSet)
 	-- 1) "check if a country is not a player"
 	-- 2) "include the country's name into the name of leader to see if it's ai"
 	-- Practical detection:
-	-- - Leader.Value NOT equal to any player identity => AI
+	-- - Leader object value NOT equal to any player identity => AI
 	-- - OR leader string contains "AI"
 	-- - OR leader string contains the country name (common AI labeling)
 	local leader = country:FindFirstChild("Leader")

@@ -39,6 +39,7 @@ local UI = {
 	ResourceRows = {},
 	Cards = {},
 	PageConnections = {},
+	RootConnections = {},
 	LastAction = { id = "refresh", title = "Refresh nation scan", risk = "Low" }
 }
 
@@ -192,6 +193,38 @@ end
 local function trackPageConnection(conn)
 	UI.PageConnections[#UI.PageConnections + 1] = conn
 	return conn
+end
+
+local function trackRootConnection(conn)
+	UI.RootConnections[#UI.RootConnections + 1] = conn
+	return conn
+end
+
+local function disconnectConnections(list)
+	for _, conn in ipairs(list) do
+		if conn and conn.Disconnect then
+			pcall(function()
+				conn:Disconnect()
+			end)
+		end
+	end
+end
+
+local function installGlobalCleanup()
+	if _G and type(_G.RoNNationBrainCleanup) == "function" then
+		pcall(_G.RoNNationBrainCleanup)
+	end
+	if _G then
+		_G.RoNNationBrainCleanup = function()
+			disconnectConnections(UI.PageConnections)
+			disconnectConnections(UI.RootConnections)
+			UI.PageConnections = {}
+			UI.RootConnections = {}
+			if UI.Screen and UI.Screen.Parent then
+				UI.Screen:Destroy()
+			end
+		end
+	end
 end
 
 local function setBar(bar, value)
@@ -735,11 +768,7 @@ end
 
 local function clearPage()
 	if not UI.Page then return end
-	for _, conn in ipairs(UI.PageConnections) do
-		if conn and conn.Disconnect then
-			conn:Disconnect()
-		end
-	end
+	disconnectConnections(UI.PageConnections)
 	UI.PageConnections = {}
 	for _, child in ipairs(UI.Page:GetChildren()) do
 		child:Destroy()
@@ -1171,9 +1200,8 @@ local function renderSettingsPage()
 			CONFIG.NotificationsEnabled = v
 		end)
 		makeButton(left, "Unload Nation Brain UI", UDim2.fromOffset(18, y + 8), UDim2.fromOffset(220, 36), function()
-			if UI.Screen then
-				UI.Screen:Destroy()
-				UI.Screen = nil
+			if _G and type(_G.RoNNationBrainCleanup) == "function" then
+				_G.RoNNationBrainCleanup()
 			end
 		end)
 
@@ -1234,24 +1262,24 @@ local function makeDraggable(frame, handle)
 	local dragging = false
 	local dragStart
 	local startPos
-	handle.InputBegan:Connect(function(input)
+	trackRootConnection(handle.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
 			dragStart = input.Position
 			startPos = frame.Position
 		end
-	end)
-	UserInputService.InputChanged:Connect(function(input)
+	end))
+	trackRootConnection(UserInputService.InputChanged:Connect(function(input)
 		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
 			local delta = input.Position - dragStart
 			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
 		end
-	end)
-	UserInputService.InputEnded:Connect(function(input)
+	end))
+	trackRootConnection(UserInputService.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = false
 		end
-	end)
+	end))
 end
 
 local function createNationBrainUI()
@@ -1399,6 +1427,9 @@ end
 function updateBrainUI()
 	if not UI.Screen or not UI.Screen.Parent then return end
 	UI.Screen.Enabled = CONFIG.BrainDashboardEnabled
+	if not CONFIG.BrainDashboardEnabled then
+		return
+	end
 	if UI.Clock then
 		UI.Clock.Text = os.date("!%H:%M:%S") .. " UTC"
 	end
@@ -1557,11 +1588,12 @@ local function updateDashboard()
 	updateBrainUI()
 end
 
+installGlobalCleanup()
 buildPolicyInfo()
 PolicyCountLabel:SetText("Policies Loaded: " .. tostring(#Policy.Info))
 createNationBrainUI()
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
+trackRootConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then
 		return
 	end
@@ -1571,7 +1603,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 			UI.Screen.Enabled = CONFIG.BrainDashboardEnabled
 		end
 	end
-end)
+end))
 
 --============================================================
 
