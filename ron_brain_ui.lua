@@ -2,10 +2,10 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-19.2"
-BrainUI.UniversalUIVersion = "2026-06-19.1"
+BrainUI.Version = "2026-06-19.3"
+BrainUI.UniversalUIVersion = "2026-06-19.2"
 
-local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/1935bd51131e7f9137ee0504c2271d66e9a424ef/universal_ui.lua"
+local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/07ad44f8d70b7c698cdaa2cec76024bea5a23c21/universal_ui.lua"
 
 local function loadUniversalUI()
 	local ok, result = pcall(function()
