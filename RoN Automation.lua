@@ -1841,7 +1841,7 @@ end
 -- Nation Brain UI Library
 --============================================================
 local RequiredBrainUIVersion = "2026-06-19.5"
-local BrainUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua"
+local BrainUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/edc71da81c06598cd0cbb9618818e4951190a9a0/ron_brain_ui.lua"
 
 local function makeHeadlessStatus(text)
 	local obj = { Text = text or "" }
