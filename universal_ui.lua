@@ -4,7 +4,7 @@
 local UniversalUI = {}
 
 UniversalUI.Name = "Universal UI"
-UniversalUI.Version = "2026-06-19.4"
+UniversalUI.Version = "2026-06-19.5"
 
 UniversalUI.Themes = {
 	Default = {
@@ -205,7 +205,7 @@ local function progress(parent, pos, size, color, theme)
 	return obj
 end
 
-local function button(parent, value, pos, size, callback, theme)
+local function button(parent, value, pos, size, callback, theme, owner)
 	theme = theme or UniversalUI.Themes.Default
 	local btn = inst("TextButton", {
 		BackgroundColor3 = Color3.fromRGB(14, 45, 76),
@@ -222,12 +222,15 @@ local function button(parent, value, pos, size, callback, theme)
 	corner(btn, 6)
 	stroke(btn, theme.lineBright, 0.15, 1)
 	if callback then
-		btn.MouseButton1Click:Connect(function()
+		local conn = btn.MouseButton1Click:Connect(function()
 			local ok, err = pcall(callback)
 			if not ok then
 				warn("[UniversalUI] button callback failed:", tostring(err))
 			end
 		end)
+		if owner and owner.Connections then
+			owner.Connections[#owner.Connections + 1] = conn
+		end
 	end
 	return btn
 end
@@ -412,6 +415,15 @@ function RuntimeMethods:Every(key, interval, callback)
 	return false, err
 end
 
+local function removeRuntimeTask(runtime, token)
+	for i = #runtime.Tasks, 1, -1 do
+		if runtime.Tasks[i] == token then
+			table.remove(runtime.Tasks, i)
+			return
+		end
+	end
+end
+
 function RuntimeMethods:Delay(seconds, callback)
 	local token = { Alive = true }
 	self.Tasks[#self.Tasks + 1] = token
@@ -419,9 +431,12 @@ function RuntimeMethods:Delay(seconds, callback)
 		if self.Alive and token.Alive then
 			safeCall(self.Name .. ".delay", callback, self)
 		end
+		token.Alive = false
+		removeRuntimeTask(self, token)
 	end)
 	return function()
 		token.Alive = false
+		removeRuntimeTask(self, token)
 	end
 end
 
@@ -432,9 +447,12 @@ function RuntimeMethods:Spawn(callback)
 		if self.Alive and token.Alive then
 			safeCall(self.Name .. ".spawn", callback, self)
 		end
+		token.Alive = false
+		removeRuntimeTask(self, token)
 	end)
 	return function()
 		token.Alive = false
+		removeRuntimeTask(self, token)
 	end
 end
 
@@ -753,7 +771,7 @@ end
 function SectionMethods:AddButton(titleValue, callback)
 	local theme = self.Theme
 	local row = self:_row(36, "ButtonRow")
-	local btn = button(row, titleValue or "Run", UDim2.fromOffset(0, 0), UDim2.new(1, 0, 1, 0), callback, theme)
+	local btn = button(row, titleValue or "Run", UDim2.fromOffset(0, 0), UDim2.new(1, 0, 1, 0), callback, theme, self.Window)
 	self.Controls[#self.Controls + 1] = btn
 	return btn
 end
