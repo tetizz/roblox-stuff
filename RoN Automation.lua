@@ -52,24 +52,39 @@ if _G then
 	end
 end
 
-local CountryData = workspace:WaitForChild("CountryData")
-local GameManager = workspace:WaitForChild("GameManager")
-local ManageAlliance = GameManager:WaitForChild("ManageAlliance")
-local CreateBuilding = GameManager:WaitForChild("CreateBuilding")
-local JustifyWar = GameManager:WaitForChild("JustifyWar")
-local CountryWorker = GameManager:WaitForChild("CountryWorker")
-local ChangeLaw = GameManager:WaitForChild("ChangeLaw")
+local function waitRequired(parent, childName, timeout)
+	if not parent then
+		error("[RoN Nation Brain] missing parent for required child: " .. tostring(childName), 2)
+	end
 
-local Assets = ReplicatedStorage:WaitForChild("Assets")
-local Resources = Assets:WaitForChild("Resources")
-local BuildingsFolder = Assets:WaitForChild("Buildings")
+	local ok, result = pcall(function()
+		return parent:WaitForChild(childName, timeout or 10)
+	end)
+	if ok and result then
+		return result
+	end
+
+	error("[RoN Nation Brain] required child unavailable: " .. tostring(childName), 2)
+end
+
+local CountryData = waitRequired(workspace, "CountryData")
+local GameManager = waitRequired(workspace, "GameManager")
+local ManageAlliance = waitRequired(GameManager, "ManageAlliance")
+local CreateBuilding = waitRequired(GameManager, "CreateBuilding")
+local JustifyWar = waitRequired(GameManager, "JustifyWar")
+local CountryWorker = waitRequired(GameManager, "CountryWorker")
+local ChangeLaw = waitRequired(GameManager, "ChangeLaw")
+
+local Assets = waitRequired(ReplicatedStorage, "Assets")
+local Resources = waitRequired(Assets, "Resources")
+local BuildingsFolder = waitRequired(Assets, "Buildings")
 local LawsFolder = Assets:FindFirstChild("Laws")
 local PoliciesFolder = LawsFolder and LawsFolder:FindFirstChild("Policies")
 
-local Baseplate = workspace:WaitForChild("Baseplate")
-local CitiesRoot = Baseplate:WaitForChild("Cities")
+local Baseplate = waitRequired(workspace, "Baseplate")
+local CitiesRoot = waitRequired(Baseplate, "Cities")
 
-local Units = workspace:WaitForChild("Units")
+local Units = waitRequired(workspace, "Units")
 
 -- Fast refs like your old scripts
 local GetChildren = game.GetChildren
@@ -92,7 +107,7 @@ local CONFIG = {
 	TradeAttemptCheckDelay = 1.5,
 	TradeCooldownSeconds = 120,
 	TradeBypassFlowSafety = false, -- if false: block if flow negative OR units > flow
-	TradeOnlyAI = true, -- you asked to detect non-player / AI; keep it AI-only
+	TradeOnlyAI = true, -- AI-only country filter
 
 	-- Automations toggles
 	AutoBuildEnabled = false,
