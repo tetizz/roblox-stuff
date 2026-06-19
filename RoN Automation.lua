@@ -2,12 +2,8 @@
 -- Preferred formatting: one space around =
 
 --============================================================
--- Obsidian UI
+-- RoN Nation Brain UI
 --============================================================
-local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
-local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
-local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
-local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
 
 --============================================================
 -- Services / Refs
@@ -17,6 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local workspace = game:GetService("Workspace")
 local CoreGui = game:GetService("CoreGui")
 local StarterGui = game:GetService("StarterGui")
+local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -85,6 +82,9 @@ local CONFIG = {
 	AutoPeaceEnabled = false,
 
 	AutoPromoteEnabled = false, -- corrupt leader promote
+
+	BrainDashboardEnabled = true,
+	BrainStrategyMode = "Economic Power",
 
 	NotificationsEnabled = true
 }
@@ -1306,6 +1306,7 @@ end
 --============================================================
 local Policy = {
 	Info = {},
+	Selected = {},
 	RecentlyEnacted = {},
 	LastStatus = "Idle"
 }
@@ -1397,8 +1398,7 @@ local function doAutoPolicy()
 	local selected = 0
 
 	for _, policy in ipairs(Policy.Info) do
-		local toggle = Library.Toggles[policy.key]
-		if toggle and toggle.Value then
+		if Policy.Selected[policy.name] then
 			selected = selected + 1
 			if not active[policy.name] and not Policy.RecentlyEnacted[policy.name] and power >= policy.cost then
 				ChangeLaw:FireServer("Policy", policy.name)
@@ -1705,512 +1705,81 @@ local function attemptAutoBuildOnce(BuildAttemptLabel, BuildCityLabel, BuildTier
 end
 
 --============================================================
--- UI
+-- Nation Brain UI Library
 --============================================================
-local Window = Library:CreateWindow({
-	Title = "RoN Automation",
-	Footer = "Dashboard / Trade / War / Build / Resources / Policies / Watchers",
-	NotifySide = "Right",
-	Resizable = true,
-	EnableSidebarResize = true
+local BrainUILibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua"))()
+local BrainUI = BrainUILibrary.new({
+	CONFIG = CONFIG,
+	CoreGui = CoreGui,
+	UserInputService = UserInputService,
+	workspace = workspace,
+	Resources = Resources,
+	BuildingsFolder = BuildingsFolder,
+	CountryData = CountryData,
+	Policy = Policy,
+	assertStillLeader = assertStillLeader,
+	getAllMyCitiesSorted = getAllMyCitiesSorted,
+	getMyFunds = getMyFunds,
+	getPolicyPower = getPolicyPower,
+	getCountryResourceFlow = getCountryResourceFlow,
+	getTradeCount = getTradeCount,
+	getNetIncome = getNetIncome,
+	computeTotalNeedByResource = computeTotalNeedByResource,
+	scanAndResupplyOnce = scanAndResupplyOnce,
+	attemptAutoBuildOnce = attemptAutoBuildOnce,
+	doAutoPolicy = doAutoPolicy,
+	safeNotify = safeNotify,
+	buildPolicyInfo = buildPolicyInfo
 })
 
-Library.ToggleKeybind = Enum.KeyCode.RightShift
+local DashCountryLabel = BrainUI.Status.DashCountryLabel
+local DashFundsLabel = BrainUI.Status.DashFundsLabel
+local DashPoliticalLabel = BrainUI.Status.DashPoliticalLabel
+local DashCitiesLabel = BrainUI.Status.DashCitiesLabel
+local DashTradeLabel = BrainUI.Status.DashTradeLabel
+local DashFlowLabel = BrainUI.Status.DashFlowLabel
+local DashWarsLabel = BrainUI.Status.DashWarsLabel
+local DashAutoLabel = BrainUI.Status.DashAutoLabel
+local DashWarLabel = BrainUI.Status.DashWarLabel
+local DashBuildLabel = BrainUI.Status.DashBuildLabel
+local DashResourceLabel = BrainUI.Status.DashResourceLabel
+local DashWatcherLabel = BrainUI.Status.DashWatcherLabel
+local DashPolicyLabel = BrainUI.Status.DashPolicyLabel
 
-local Tabs = {
-	Dashboard = Window:AddTab("Dashboard", "activity"),
-	Trade = Window:AddTab("Trade", "user"),
-	War = Window:AddTab("War", "swords"),
-	Build = Window:AddTab("Build", "hammer"),
-	Resources = Window:AddTab("Resources", "package"),
-	Policies = Window:AddTab("Policies", "sliders"),
-	Watchers = Window:AddTab("Watchers", "bell"),
-	Settings = Window:AddTab("Settings", "settings")
-}
+local TradeStatusLabel = BrainUI.Status.TradeStatusLabel
+local TradeCountryLabel = BrainUI.Status.TradeCountryLabel
+local TradePartnerLabel = BrainUI.Status.TradePartnerLabel
+local TradeFlowLabel = BrainUI.Status.TradeFlowLabel
+local TradeIncomeLabel = BrainUI.Status.TradeIncomeLabel
+local TradePercentLabel = BrainUI.Status.TradePercentLabel
+local TradeAttemptingLabel = BrainUI.Status.TradeAttemptingLabel
+local TradeValidLabel = BrainUI.Status.TradeValidLabel
+local TradeValidListLabel = BrainUI.Status.TradeValidListLabel
+local TradeFlowSafetyLabel = BrainUI.Status.TradeFlowSafetyLabel
 
-local DashboardLeft = Tabs.Dashboard:AddLeftGroupbox("Country")
-local DashboardRight = Tabs.Dashboard:AddRightGroupbox("Automation")
+local WarStatusLabel = BrainUI.Status.WarStatusLabel
+local PromoteStatusLabel = BrainUI.Status.PromoteStatusLabel
+local AutoResupplyStatusLabel = BrainUI.Status.AutoResupplyStatusLabel
+local AutoResupplyDetailsLabel = BrainUI.Status.AutoResupplyDetailsLabel
+local UnitTagsStatusLabel = BrainUI.Status.UnitTagsStatusLabel
+local PolicyStatusLabel = BrainUI.Status.PolicyStatusLabel
+local PolicyCountLabel = BrainUI.Status.PolicyCountLabel
+local WatcherStatusLabel = BrainUI.Status.WatcherStatusLabel
+local JustWatchStatusLabel = BrainUI.Status.JustWatchStatusLabel
+local LeaderWatchStatusLabel = BrainUI.Status.LeaderWatchStatusLabel
 
-local TradeLeft = Tabs.Trade:AddLeftGroupbox("Trading")
-local TradeRight = Tabs.Trade:AddRightGroupbox("Status")
+local AutoBuildStatusLabel = BrainUI.Status.AutoBuildStatusLabel
+local BuildCitiesFolderLabel = BrainUI.Status.BuildCitiesFolderLabel
+local BuildCitiesCountLabel = BrainUI.Status.BuildCitiesCountLabel
+local BuildCityLabel = BrainUI.Status.BuildCityLabel
+local BuildTierLabel = BrainUI.Status.BuildTierLabel
+local BuildInfraLabel = BrainUI.Status.BuildInfraLabel
+local BuildFundsLabel = BrainUI.Status.BuildFundsLabel
+local BuildQueueLabel = BrainUI.Status.BuildQueueLabel
+local BuildAttemptLabel = BrainUI.Status.BuildAttemptLabel
 
-local WarLeft = Tabs.War:AddLeftGroupbox("War Automation")
-local WarRight = Tabs.War:AddRightGroupbox("War Status")
-
-local BuildLeft = Tabs.Build:AddLeftGroupbox("Build Automation")
-local BuildRight = Tabs.Build:AddRightGroupbox("Build Status")
-
-local ResourcesLeft = Tabs.Resources:AddLeftGroupbox("Resource Automation")
-local ResourcesRight = Tabs.Resources:AddRightGroupbox("Resource Status")
-
-local PoliciesLeft = Tabs.Policies:AddLeftGroupbox("Auto Policy")
-local PoliciesRight = Tabs.Policies:AddRightGroupbox("Policy Status")
-
-local WatchersLeft = Tabs.Watchers:AddLeftGroupbox("Watchers")
-local WatchersRight = Tabs.Watchers:AddRightGroupbox("Watcher Status")
-
-local Toggles = Library.Toggles
-local Options = Library.Options
-
--- Dashboard labels
-local DashCountryLabel = DashboardLeft:AddLabel("Country: ?")
-local DashFundsLabel = DashboardLeft:AddLabel("Funds: ?")
-local DashPoliticalLabel = DashboardLeft:AddLabel("Political Power: ?")
-local DashCitiesLabel = DashboardLeft:AddLabel("Cities: ?")
-local DashTradeLabel = DashboardLeft:AddLabel("Trade: ?")
-local DashFlowLabel = DashboardLeft:AddLabel("Flow: ?")
-local DashWarsLabel = DashboardLeft:AddLabel("Wars: ?")
-local DashAutoLabel = DashboardRight:AddLabel("Enabled: none")
-local DashWarLabel = DashboardRight:AddLabel("War: idle")
-local DashBuildLabel = DashboardRight:AddLabel("Build: idle")
-local DashResourceLabel = DashboardRight:AddLabel("Resources: idle")
-local DashWatcherLabel = DashboardRight:AddLabel("Watchers: idle")
-local DashPolicyLabel = DashboardRight:AddLabel("Policy: idle")
-
--- Trade labels
-local TradeStatusLabel = TradeRight:AddLabel("Status: Idle")
-local TradeCountryLabel = TradeRight:AddLabel("Country: ?")
-local TradePartnerLabel = TradeRight:AddLabel("Partners: ?")
-local TradeFlowLabel = TradeRight:AddLabel("Flow: ?")
-local TradeIncomeLabel = TradeRight:AddLabel("Trade Export: ?")
-local TradePercentLabel = TradeRight:AddLabel("Trade Percent: ?")
-local TradeAttemptingLabel = TradeRight:AddLabel("Attempting to trade: (none)")
-local TradeValidLabel = TradeRight:AddLabel("Valid countries: 0")
-local TradeValidListLabel = TradeRight:AddLabel("Valid list: (none)")
-local TradeFlowSafetyLabel = TradeRight:AddLabel("Flow Safety: ON")
-
--- Automations status labels
-local WarStatusLabel = WarRight:AddLabel("Auto Wars: Idle")
-local PromoteStatusLabel = WarRight:AddLabel("Auto Promote: Idle")
-
-local AutoResupplyStatusLabel = ResourcesRight:AddLabel("Auto Resupply: Idle")
-local AutoResupplyDetailsLabel = ResourcesRight:AddLabel("Resupply Details: (none)")
-local UnitTagsStatusLabel = ResourcesRight:AddLabel("Unit Tags: Idle")
-
-local PolicyStatusLabel = PoliciesRight:AddLabel("Auto Policy: Idle")
-local PolicyCountLabel = PoliciesRight:AddLabel("Policies Loaded: 0")
-
-local WatcherStatusLabel = WatchersRight:AddLabel("Rebel Watch: Idle")
-local JustWatchStatusLabel = WatchersRight:AddLabel("Justify Watch: Idle")
-local LeaderWatchStatusLabel = WatchersRight:AddLabel("Leader Watch: Idle")
-
--- Build labels (minimal, keep in automations status)
-local AutoBuildStatusLabel = BuildRight:AddLabel("Auto Build: Idle")
-local BuildCitiesFolderLabel = BuildRight:AddLabel("Cities Folder: ?")
-local BuildCitiesCountLabel = BuildRight:AddLabel("Cities Found: 0")
-local BuildCityLabel = BuildRight:AddLabel("City: ?")
-local BuildTierLabel = BuildRight:AddLabel("Tier: ?")
-local BuildInfraLabel = BuildRight:AddLabel("Infrastructure: ?")
-local BuildFundsLabel = BuildRight:AddLabel("Funds: ?")
-local BuildQueueLabel = BuildRight:AddLabel("Queue Unit: ?")
-local BuildAttemptLabel = BuildRight:AddLabel("Build Attempt: (none)")
-
--- Trade UI helper
-local function setTradeValidList(names)
-	TradeValidLabel:SetText("Valid countries: " .. tostring(#names))
-
-	local maxShow = 12
-	local shown = {}
-	for i = 1, math.min(#names, maxShow) do
-		shown[#shown + 1] = names[i]
-	end
-
-	local suffix = ""
-	if #names > maxShow then
-		suffix = " ... +" .. tostring(#names - maxShow)
-	end
-
-	if #shown == 0 then
-		TradeValidListLabel:SetText("Valid list: (none)")
-	else
-		TradeValidListLabel:SetText("Valid list: " .. table.concat(shown, ", ") .. suffix)
-	end
-end
-
-local function countMyWars(myCountryName)
-	local warsFolder = workspace:FindFirstChild("Wars")
-	if not warsFolder or not myCountryName then
-		return 0
-	end
-
-	local total = 0
-	for _, war in ipairs(warsFolder:GetChildren()) do
-		local attacker = war:FindFirstChild("Attacker")
-		local defender = war:FindFirstChild("Defender")
-		if (attacker and attacker:FindFirstChild(myCountryName)) or (defender and defender:FindFirstChild(myCountryName)) then
-			total = total + 1
-		end
-	end
-	return total
-end
-
-local function joinEnabled(items)
-	local enabled = {}
-	for _, item in ipairs(items) do
-		if item.on then
-			enabled[#enabled + 1] = item.name
-		end
-	end
-	if #enabled == 0 then
-		return "none"
-	end
-	return table.concat(enabled, ", ")
-end
-
-local function updateDashboard()
-	local ok, myCountry = assertStillLeader()
-	if ok then
-		local cities = getAllMyCitiesSorted()
-		local funds, source = getMyFunds()
-		local power = getPolicyPower(myCountry)
-		local flow = getCountryResourceFlow(myCountry, CONFIG.TradeResource)
-		local tradeCount = getTradeCount(myCountry, CONFIG.TradeResource)
-
-		DashCountryLabel:SetText("Country: " .. myCountry.Name)
-		DashFundsLabel:SetText("Funds: " .. tostring(funds) .. " (" .. tostring(source) .. ")")
-		DashPoliticalLabel:SetText("Political Power: " .. tostring(power))
-		DashCitiesLabel:SetText("Cities: " .. tostring(#cities))
-		DashTradeLabel:SetText("Trade: " .. tostring(tradeCount) .. " " .. tostring(CONFIG.TradeResource))
-		DashFlowLabel:SetText("Flow: " .. tostring(flow))
-		DashWarsLabel:SetText("Wars: " .. tostring(countMyWars(myCountry.Name)))
-	else
-		DashCountryLabel:SetText("Country: (not leader)")
-		DashFundsLabel:SetText("Funds: ?")
-		DashPoliticalLabel:SetText("Political Power: ?")
-		DashCitiesLabel:SetText("Cities: ?")
-		DashTradeLabel:SetText("Trade: ?")
-		DashFlowLabel:SetText("Flow: ?")
-		DashWarsLabel:SetText("Wars: ?")
-	end
-
-	DashAutoLabel:SetText("Enabled: " .. joinEnabled({
-		{ name = "Trade", on = CONFIG.TradeEnabled },
-		{ name = "War", on = CONFIG.AutoJustifyEnabled or CONFIG.AutoDeclareEnabled or CONFIG.AutoPeaceEnabled },
-		{ name = "Build", on = CONFIG.AutoBuildEnabled },
-		{ name = "Resources", on = CONFIG.AutoResupplyEnabled or CONFIG.UnitTagsEnabled },
-		{ name = "Policies", on = CONFIG.AutoPolicyEnabled },
-		{ name = "Watchers", on = CONFIG.WatcherEnabled or CONFIG.JustifyWatchEnabled or CONFIG.LeaderWatchEnabled }
-	}))
-	DashWarLabel:SetText("War: " .. tostring(War.LastStatus))
-	DashBuildLabel:SetText("Build: " .. (CONFIG.AutoBuildEnabled and "running" or "idle"))
-	DashResourceLabel:SetText("Resources: " .. joinEnabled({
-		{ name = "Resupply", on = CONFIG.AutoResupplyEnabled },
-		{ name = "Tags", on = CONFIG.UnitTagsEnabled }
-	}))
-	DashWatcherLabel:SetText("Watchers: " .. joinEnabled({
-		{ name = "Rebel", on = CONFIG.WatcherEnabled },
-		{ name = "Justify", on = CONFIG.JustifyWatchEnabled },
-		{ name = "Leader", on = CONFIG.LeaderWatchEnabled }
-	}))
-	DashPolicyLabel:SetText("Policy: " .. tostring(Policy.LastStatus))
-end
-
---============================================================
--- Trade controls
---============================================================
-TradeLeft:AddToggle("TradeEnabled", {
-	Text = "Enable Auto Trading",
-	Default = false
-}):OnChanged(function()
-	CONFIG.TradeEnabled = Toggles.TradeEnabled.Value
-	TradeStatusLabel:SetText("Status: " .. (CONFIG.TradeEnabled and "Running" or "Idle"))
-end)
-
-TradeLeft:AddToggle("TradeBypassFlowSafety", {
-	Text = "Bypass Flow Safety (NEG flow + Units>Flow)",
-	Default = false
-}):OnChanged(function()
-	CONFIG.TradeBypassFlowSafety = Toggles.TradeBypassFlowSafety.Value
-	TradeFlowSafetyLabel:SetText("Flow Safety: " .. (CONFIG.TradeBypassFlowSafety and "BYPASS" or "ON"))
-end)
-
-TradeLeft:AddDropdown("TradeResource", {
-	Text = "Resource",
-	Values = (function()
-		local list = {}
-		for _, r in ipairs(Resources:GetChildren()) do
-			if r:IsA("NumberValue") then
-				table.insert(list, r.Name)
-			end
-		end
-		table.sort(list)
-		return list
-	end)(),
-	Default = CONFIG.TradeResource,
-	Searchable = true
-}):OnChanged(function()
-	CONFIG.TradeResource = Options.TradeResource.Value
-end)
-
-TradeLeft:AddSlider("TradeTargetPercent", {
-	Text = "Trade Percent",
-	Default = 79,
-	Min = 0,
-	Max = 80,
-	Rounding = 0,
-	Suffix = "%"
-}):OnChanged(function(v)
-	CONFIG.TradeTargetPercent = v / 100
-end)
-
-TradeLeft:AddSlider("TradeDelay", {
-	Text = "Trade Loop Delay",
-	Default = 0.8,
-	Min = 0.1,
-	Max = 10,
-	Rounding = 1,
-	Suffix = "s"
-}):OnChanged(function(v)
-	CONFIG.TradeDelaySeconds = v
-end)
-
-TradeLeft:AddSlider("TradeCooldown", {
-	Text = "Trade Retry Delay",
-	Default = 120,
-	Min = 10,
-	Max = 600,
-	Rounding = 0,
-	Suffix = "s"
-}):OnChanged(function(v)
-	CONFIG.TradeCooldownSeconds = v
-end)
-
-TradeLeft:AddButton("Unload UI", function()
-	if Window and Window.Destroy then
-		Window:Destroy()
-	else
-		for _, gui in ipairs(CoreGui:GetChildren()) do
-			if string.find(gui.Name:lower(), "obsidian") then
-				gui:Destroy()
-			end
-		end
-	end
-end)
-
---============================================================
--- Automations controls (NO one-time buttons)
---============================================================
-BuildLeft:AddToggle("AutoBuildEnabled", {
-	Text = "Auto Build",
-	Default = false
-}):OnChanged(function()
-	CONFIG.AutoBuildEnabled = Toggles.AutoBuildEnabled.Value
-	AutoBuildStatusLabel:SetText("Auto Build: " .. (CONFIG.AutoBuildEnabled and "Running" or "Idle"))
-end)
-
-BuildLeft:AddDropdown("AutoBuildPriority", {
-	Text = "Priority Mode",
-	Values = { "Selected Order", "Infrastructure First", "Develop First", "Factories First" },
-	Default = CONFIG.AutoBuildPriority
-}):OnChanged(function()
-	CONFIG.AutoBuildPriority = Options.AutoBuildPriority.Value
-end)
-
-BuildLeft:AddToggle("AutoBuildSkipQueued", {
-	Text = "Skip Queued Cities",
-	Default = true
-}):OnChanged(function()
-	CONFIG.AutoBuildSkipQueued = Toggles.AutoBuildSkipQueued.Value
-end)
-
-BuildLeft:AddDropdown("AutoBuildBuildings", {
-	Text = "Buildings (Multi-select)",
-	Values = (function()
-		local list = {}
-		for _, b in ipairs(BuildingsFolder:GetChildren()) do
-			if b.Name ~= "Expand Canal" then
-				table.insert(list, b.Name)
-			end
-		end
-		table.sort(list)
-		return list
-	end)(),
-	Default = {},
-	Searchable = true,
-	Multi = true
-}):OnChanged(function()
-	local selectedMap = Options.AutoBuildBuildings.Value
-	local ordered = {}
-	local values = Options.AutoBuildBuildings.Values
-
-	for i = 1, #values do
-		local name = values[i]
-		if selectedMap[name] then
-			ordered[#ordered + 1] = name
-		end
-	end
-
-	CONFIG.AutoBuildSelected = ordered
-end)
-
-ResourcesLeft:AddToggle("AutoResupplyEnabled", {
-	Text = "Auto Resupply (AI only)",
-	Default = false
-}):OnChanged(function()
-	CONFIG.AutoResupplyEnabled = Toggles.AutoResupplyEnabled.Value
-	AutoResupplyStatusLabel:SetText("Auto Resupply: " .. (CONFIG.AutoResupplyEnabled and "Running" or "Idle"))
-end)
-
-ResourcesLeft:AddToggle("AutoResupplyOnlyNegativeFlow", {
-	Text = "Only Negative Flow",
-	Default = true
-}):OnChanged(function()
-	CONFIG.AutoResupplyOnlyNegativeFlow = Toggles.AutoResupplyOnlyNegativeFlow.Value
-end)
-
-ResourcesLeft:AddSlider("ResupplyMaxTrades", {
-	Text = "Max Trades Per Scan",
-	Default = Resupply.MaxTradesPerScan,
-	Min = 1,
-	Max = 20,
-	Rounding = 0
-}):OnChanged(function(v)
-	Resupply.MaxTradesPerScan = v
-end)
-
-ResourcesLeft:AddToggle("UnitTagsEnabled", {
-	Text = "Unit Tags (force on)",
-	Default = false
-}):OnChanged(function()
-	CONFIG.UnitTagsEnabled = Toggles.UnitTagsEnabled.Value
-	UnitTagsStatusLabel:SetText("Unit Tags: " .. (CONFIG.UnitTagsEnabled and "Running" or "Idle"))
-end)
-
-buildPolicyInfo()
-PolicyCountLabel:SetText("Policies Loaded: " .. tostring(#Policy.Info))
-
-PoliciesLeft:AddToggle("AutoPolicyEnabled", {
-	Text = "Auto Policy",
-	Default = false
-}):OnChanged(function()
-	CONFIG.AutoPolicyEnabled = Toggles.AutoPolicyEnabled.Value
-	PolicyStatusLabel:SetText("Auto Policy: " .. (CONFIG.AutoPolicyEnabled and "Running" or "Idle"))
-end)
-
-if #Policy.Info > 0 then
-	for _, policy in ipairs(Policy.Info) do
-		PoliciesLeft:AddToggle(policy.key, {
-			Text = policy.name,
-			Default = false
-		})
-	end
-else
-	PoliciesRight:AddLabel("Policy controls unavailable")
-end
-
-WatchersLeft:AddToggle("WatcherEnabled", {
-	Text = "Rebel Watch (constant)",
-	Default = false
-}):OnChanged(function()
-	CONFIG.WatcherEnabled = Toggles.WatcherEnabled.Value
-	WatcherStatusLabel:SetText("Rebel Watch: " .. (CONFIG.WatcherEnabled and "Running" or "Idle"))
-end)
-
-WatchersLeft:AddToggle("JustifyWatchEnabled", {
-	Text = "Justification Watch (constant)",
-	Default = false
-}):OnChanged(function()
-	CONFIG.JustifyWatchEnabled = Toggles.JustifyWatchEnabled.Value
-	JustWatchStatusLabel:SetText("Justify Watch: " .. (CONFIG.JustifyWatchEnabled and "Running" or "Idle"))
-end)
-
-WatchersLeft:AddToggle("LeaderWatchEnabled", {
-	Text = "Leader Watch (corrupt)",
-	Default = false
-}):OnChanged(function()
-	CONFIG.LeaderWatchEnabled = Toggles.LeaderWatchEnabled.Value
-	LeaderWatchStatusLabel:SetText("Leader Watch: " .. (CONFIG.LeaderWatchEnabled and "Running" or "Idle"))
-end)
-
-WarLeft:AddToggle("AutoJustifyEnabled", {
-	Text = "Auto Justify",
-	Default = false
-}):OnChanged(function()
-	CONFIG.AutoJustifyEnabled = Toggles.AutoJustifyEnabled.Value
-end)
-
-WarLeft:AddToggle("AutoJustifyAIOnly", {
-	Text = "Auto Justify AI Only",
-	Default = true
-}):OnChanged(function()
-	CONFIG.AutoJustifyAIOnly = Toggles.AutoJustifyAIOnly.Value
-end)
-
-WarLeft:AddToggle("AutoJustifySkipAllies", {
-	Text = "Skip Allies",
-	Default = true
-}):OnChanged(function()
-	CONFIG.AutoJustifySkipAllies = Toggles.AutoJustifySkipAllies.Value
-end)
-
-WarLeft:AddToggle("AutoJustifySkipWars", {
-	Text = "Skip Countries At War",
-	Default = true
-}):OnChanged(function()
-	CONFIG.AutoJustifySkipWars = Toggles.AutoJustifySkipWars.Value
-end)
-
-WarLeft:AddToggle("AutoJustifyRequireCities", {
-	Text = "Require Cities",
-	Default = true
-}):OnChanged(function()
-	CONFIG.AutoJustifyRequireCities = Toggles.AutoJustifyRequireCities.Value
-end)
-
-WarLeft:AddSlider("AutoJustifyRetry", {
-	Text = "Justify Retry Delay",
-	Default = CONFIG.AutoJustifyRetrySeconds,
-	Min = 10,
-	Max = 300,
-	Rounding = 0,
-	Suffix = "s"
-}):OnChanged(function(v)
-	CONFIG.AutoJustifyRetrySeconds = v
-end)
-
-WarLeft:AddToggle("AutoDeclareEnabled", {
-	Text = "Auto Declare (AI only)",
-	Default = false
-}):OnChanged(function()
-	CONFIG.AutoDeclareEnabled = Toggles.AutoDeclareEnabled.Value
-end)
-
-WarLeft:AddToggle("AutoPeaceEnabled", {
-	Text = "Auto Peace (constant)",
-	Default = false
-}):OnChanged(function()
-	CONFIG.AutoPeaceEnabled = Toggles.AutoPeaceEnabled.Value
-end)
-
-WarLeft:AddToggle("AutoPromoteEnabled", {
-	Text = "Auto Promote Corrupt Leaders",
-	Default = false
-}):OnChanged(function()
-	CONFIG.AutoPromoteEnabled = Toggles.AutoPromoteEnabled.Value
-	PromoteStatusLabel:SetText("Auto Promote: " .. (CONFIG.AutoPromoteEnabled and "Running" or "Idle"))
-end)
-
-WatchersLeft:AddToggle("NotificationsEnabled", {
-	Text = "Notifications",
-	Default = true
-}):OnChanged(function()
-	CONFIG.NotificationsEnabled = Toggles.NotificationsEnabled.Value
-end)
-
---============================================================
--- Theme + Save
---============================================================
-ThemeManager:SetLibrary(Library)
-SaveManager:SetLibrary(Library)
-
-ThemeManager:SetFolder("RoN_Auto_All")
-SaveManager:SetFolder("RoN_Auto_All")
-
-SaveManager:IgnoreThemeSettings()
-ThemeManager:ApplyToTab(Tabs.Settings)
-SaveManager:BuildConfigSection(Tabs.Settings)
-ThemeManager:LoadDefault()
-SaveManager:LoadAutoloadConfig()
+local setTradeValidList = BrainUI.setTradeValidList
+local updateDashboard = BrainUI.updateDashboard
 
 --============================================================
 -- MAIN SCHEDULER LOOP (single loop, everything runs alongside)
@@ -2360,4 +1929,4 @@ task.spawn(function()
 	end
 end)
 
-Library:Notify("RoN Automation loaded! (RightShift toggles UI)", 4)
+safeNotify("RoN Nation Brain", "Loaded. RightShift toggles the dashboard.", 4)
