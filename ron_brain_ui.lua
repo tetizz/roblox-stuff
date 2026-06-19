@@ -2,6 +2,7 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
+BrainUI.Version = "2026-06-19.1"
 
 function BrainUI.new(ctx)
 	local CONFIG = ctx.CONFIG
