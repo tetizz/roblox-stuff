@@ -328,6 +328,12 @@ local function findFirstValidBtn(root)
     end
 end
 
+local function getMyTycoon()
+    local map = Workspace:FindFirstChild("Map")
+    local tycoons = map and map:FindFirstChild("Tycoons")
+    return tycoons and tycoons:FindFirstChild(plr.Name)
+end
+
 local char, hrp
 if plr.Character then
     char = plr.Character
@@ -342,6 +348,7 @@ end))
 local function bringBtnAndTrigger(inst)
     if not hrp then return end
     local m = inst:IsA("Model") and inst or inst:FindFirstAncestorWhichIsA("Model")
+    if not m then return end
     for _, p in ipairs(m:GetDescendants()) do
         if p:IsA("BasePart") then p.CanCollide = false; p.Massless = true end
     end
@@ -411,15 +418,14 @@ local function resizeMyCollectZone()
         local myTycoon
         repeat
             task.wait(0.2)
-            local tf = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Tycoons")
-            myTycoon = tf and tf:FindFirstChild(plr.Name)
+            myTycoon = getMyTycoon()
         until myTycoon or not Runtime.Alive or not collectResizerOn
         if not Runtime.Alive or not collectResizerOn then return end
         local baseSize = Vector3.new(2000, 2000, 2000)
         local delta = Vector3.new(1, 1, 1)
         local flip = false
         while Runtime.Alive and collectResizerOn do
-            myTycoon = Workspace.Map.Tycoons:FindFirstChild(plr.Name)
+            myTycoon = getMyTycoon()
             if myTycoon then
                 local cz = myTycoon:FindFirstChild("T_Collect_Zone") and myTycoon.T_Collect_Zone:FindFirstChild("CollectZone")
                 if cz and cz:IsA("BasePart") then
@@ -574,9 +580,7 @@ task.spawn(function()
 
             if running and not busy and not rebirthing then
                 busy = true
-                local myTycoon = Workspace:FindFirstChild("Map")
-                    and Workspace.Map:FindFirstChild("Tycoons")
-                    and Workspace.Map.Tycoons:FindFirstChild(plr.Name)
+                local myTycoon = getMyTycoon()
                 if myTycoon then
                     local button = findFirstValidBtn(myTycoon)
                     if button then bringBtnAndTrigger(button) end
