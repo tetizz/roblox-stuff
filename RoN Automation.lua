@@ -1709,7 +1709,7 @@ end
 --============================================================
 local Window = Library:CreateWindow({
 	Title = "RoN Automation",
-	Footer = "Trade / War / Build / Resources / Watchers",
+	Footer = "Dashboard / Trade / War / Build / Resources / Policies / Watchers",
 	NotifySide = "Right",
 	Resizable = true,
 	EnableSidebarResize = true
@@ -1718,6 +1718,7 @@ local Window = Library:CreateWindow({
 Library.ToggleKeybind = Enum.KeyCode.RightShift
 
 local Tabs = {
+	Dashboard = Window:AddTab("Dashboard", "activity"),
 	Trade = Window:AddTab("Trade", "user"),
 	War = Window:AddTab("War", "swords"),
 	Build = Window:AddTab("Build", "hammer"),
@@ -1726,6 +1727,9 @@ local Tabs = {
 	Watchers = Window:AddTab("Watchers", "bell"),
 	Settings = Window:AddTab("Settings", "settings")
 }
+
+local DashboardLeft = Tabs.Dashboard:AddLeftGroupbox("Country")
+local DashboardRight = Tabs.Dashboard:AddRightGroupbox("Automation")
 
 local TradeLeft = Tabs.Trade:AddLeftGroupbox("Trading")
 local TradeRight = Tabs.Trade:AddRightGroupbox("Status")
@@ -1747,6 +1751,21 @@ local WatchersRight = Tabs.Watchers:AddRightGroupbox("Watcher Status")
 
 local Toggles = Library.Toggles
 local Options = Library.Options
+
+-- Dashboard labels
+local DashCountryLabel = DashboardLeft:AddLabel("Country: ?")
+local DashFundsLabel = DashboardLeft:AddLabel("Funds: ?")
+local DashPoliticalLabel = DashboardLeft:AddLabel("Political Power: ?")
+local DashCitiesLabel = DashboardLeft:AddLabel("Cities: ?")
+local DashTradeLabel = DashboardLeft:AddLabel("Trade: ?")
+local DashFlowLabel = DashboardLeft:AddLabel("Flow: ?")
+local DashWarsLabel = DashboardLeft:AddLabel("Wars: ?")
+local DashAutoLabel = DashboardRight:AddLabel("Enabled: none")
+local DashWarLabel = DashboardRight:AddLabel("War: idle")
+local DashBuildLabel = DashboardRight:AddLabel("Build: idle")
+local DashResourceLabel = DashboardRight:AddLabel("Resources: idle")
+local DashWatcherLabel = DashboardRight:AddLabel("Watchers: idle")
+local DashPolicyLabel = DashboardRight:AddLabel("Policy: idle")
 
 -- Trade labels
 local TradeStatusLabel = TradeRight:AddLabel("Status: Idle")
@@ -1806,6 +1825,84 @@ local function setTradeValidList(names)
 	else
 		TradeValidListLabel:SetText("Valid list: " .. table.concat(shown, ", ") .. suffix)
 	end
+end
+
+local function countMyWars(myCountryName)
+	local warsFolder = workspace:FindFirstChild("Wars")
+	if not warsFolder or not myCountryName then
+		return 0
+	end
+
+	local total = 0
+	for _, war in ipairs(warsFolder:GetChildren()) do
+		local attacker = war:FindFirstChild("Attacker")
+		local defender = war:FindFirstChild("Defender")
+		if (attacker and attacker:FindFirstChild(myCountryName)) or (defender and defender:FindFirstChild(myCountryName)) then
+			total = total + 1
+		end
+	end
+	return total
+end
+
+local function joinEnabled(items)
+	local enabled = {}
+	for _, item in ipairs(items) do
+		if item.on then
+			enabled[#enabled + 1] = item.name
+		end
+	end
+	if #enabled == 0 then
+		return "none"
+	end
+	return table.concat(enabled, ", ")
+end
+
+local function updateDashboard()
+	local ok, myCountry = assertStillLeader()
+	if ok then
+		local cities = getAllMyCitiesSorted()
+		local funds, source = getMyFunds()
+		local power = getPolicyPower(myCountry)
+		local flow = getCountryResourceFlow(myCountry, CONFIG.TradeResource)
+		local tradeCount = getTradeCount(myCountry, CONFIG.TradeResource)
+
+		DashCountryLabel:SetText("Country: " .. myCountry.Name)
+		DashFundsLabel:SetText("Funds: " .. tostring(funds) .. " (" .. tostring(source) .. ")")
+		DashPoliticalLabel:SetText("Political Power: " .. tostring(power))
+		DashCitiesLabel:SetText("Cities: " .. tostring(#cities))
+		DashTradeLabel:SetText("Trade: " .. tostring(tradeCount) .. " " .. tostring(CONFIG.TradeResource))
+		DashFlowLabel:SetText("Flow: " .. tostring(flow))
+		DashWarsLabel:SetText("Wars: " .. tostring(countMyWars(myCountry.Name)))
+	else
+		DashCountryLabel:SetText("Country: (not leader)")
+		DashFundsLabel:SetText("Funds: ?")
+		DashPoliticalLabel:SetText("Political Power: ?")
+		DashCitiesLabel:SetText("Cities: ?")
+		DashTradeLabel:SetText("Trade: ?")
+		DashFlowLabel:SetText("Flow: ?")
+		DashWarsLabel:SetText("Wars: ?")
+	end
+
+	DashAutoLabel:SetText("Enabled: " .. joinEnabled({
+		{ name = "Trade", on = CONFIG.TradeEnabled },
+		{ name = "War", on = CONFIG.AutoJustifyEnabled or CONFIG.AutoDeclareEnabled or CONFIG.AutoPeaceEnabled },
+		{ name = "Build", on = CONFIG.AutoBuildEnabled },
+		{ name = "Resources", on = CONFIG.AutoResupplyEnabled or CONFIG.UnitTagsEnabled },
+		{ name = "Policies", on = CONFIG.AutoPolicyEnabled },
+		{ name = "Watchers", on = CONFIG.WatcherEnabled or CONFIG.JustifyWatchEnabled or CONFIG.LeaderWatchEnabled }
+	}))
+	DashWarLabel:SetText("War: " .. tostring(War.LastStatus))
+	DashBuildLabel:SetText("Build: " .. (CONFIG.AutoBuildEnabled and "running" or "idle"))
+	DashResourceLabel:SetText("Resources: " .. joinEnabled({
+		{ name = "Resupply", on = CONFIG.AutoResupplyEnabled },
+		{ name = "Tags", on = CONFIG.UnitTagsEnabled }
+	}))
+	DashWatcherLabel:SetText("Watchers: " .. joinEnabled({
+		{ name = "Rebel", on = CONFIG.WatcherEnabled },
+		{ name = "Justify", on = CONFIG.JustifyWatchEnabled },
+		{ name = "Leader", on = CONFIG.LeaderWatchEnabled }
+	}))
+	DashPolicyLabel:SetText("Policy: " .. tostring(Policy.LastStatus))
 end
 
 --============================================================
@@ -2120,6 +2217,10 @@ SaveManager:LoadAutoloadConfig()
 --============================================================
 task.spawn(function()
 	while true do
+		runEvery("dashboard", 0.75, function()
+			updateDashboard()
+		end)
+
 		-- Common status refresh for trade
 		runEvery("ui_trade_status", 0.5, function()
 			local ok, myCountry = assertStillLeader()
