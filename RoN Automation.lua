@@ -1731,7 +1731,8 @@ end
 --============================================================
 -- Nation Brain UI Library
 --============================================================
-local BrainUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/1cdb4ac7669bb3ecd8ba3eddb0c9d7035bf484db/ron_brain_ui.lua"
+local RequiredBrainUIVersion = "2026-06-19.1"
+local BrainUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/8b1dd636abe56be6aed45bdfb371474f9e590023/ron_brain_ui.lua"
 
 local function makeHeadlessStatus(text)
 	local obj = { Text = text or "" }
@@ -1814,6 +1815,9 @@ local function loadBrainUI()
 		local library = chunk()
 		if type(library) ~= "table" or type(library.new) ~= "function" then
 			error("library did not return BrainUI.new")
+		end
+		if library.Version ~= RequiredBrainUIVersion then
+			error("library version mismatch: " .. tostring(library.Version))
 		end
 		return library.new({
 			CONFIG = CONFIG,
