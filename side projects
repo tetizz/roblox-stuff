@@ -28,7 +28,8 @@ end
 
 local Runtime = {
     Alive = true,
-    Connections = {}
+    Connections = {},
+    LastWarn = {}
 }
 
 local function disconnectRuntimeConnections()
@@ -45,6 +46,18 @@ end
 local function trackRuntimeConnection(conn)
     Runtime.Connections[#Runtime.Connections + 1] = conn
     return conn
+end
+
+local function safeRun(label, fn)
+    local ok, err = pcall(fn)
+    if ok then return true end
+
+    local t = tick()
+    if not Runtime.LastWarn[label] or (t - Runtime.LastWarn[label]) > 10 then
+        Runtime.LastWarn[label] = t
+        warn("[Tycoon Automation]", tostring(label), tostring(err))
+    end
+    return false
 end
 
 if _G then
@@ -102,7 +115,8 @@ local function antiAFK(nonotify)
             end
         end
     else
-        local VirtualUser = cloneref(game:GetService("VirtualUser"))
+        local virtualUserService = game:GetService("VirtualUser")
+        local VirtualUser = type(cloneref) == "function" and cloneref(virtualUserService) or virtualUserService
         trackRuntimeConnection(plr.Idled:Connect(function()
             VirtualUser:CaptureController()
             VirtualUser:ClickButton2(Vector2.new())
@@ -116,7 +130,10 @@ end
 antiAFK(true)
 
 -- Auto rejoin function
+local rejoining = false
 local function rejoin()
+    if rejoining or not Runtime.Alive then return end
+    rejoining = true
     if #Players:GetPlayers() <= 1 then
         plr:Kick("\nRejoining...")
         task.wait()
@@ -474,74 +491,77 @@ local lastWeatherCheck = 0
 
 task.spawn(function()
     while Runtime.Alive do
-        local bpObj = plr:FindFirstChild("ButtonProgress")
-        local unld = bpObj and bpObj:FindFirstChild("UnlockedButtons")
-        local tot = bpObj and bpObj:FindFirstChild("TotalButtons")
-        if unld and tot then
-            if unld.Value == 0 then
-                rebirthStarted = false
-                rebirthStartTime = nil
-                buttonPressCount = 0
-                lastButtonValue = 0
-                rebirthCooldown = false
-            end
-            if not rebirthStarted and unld.Value > 0 and not rebirthStartTime then
-                rebirthStartTime = tick()
-                rebirthStarted = true
-                buttonPressCount = 1
-                lastButtonValue = unld.Value
-            end
-            if rebirthStarted and unld.Value > lastButtonValue then
-                buttonPressCount = buttonPressCount + (unld.Value - lastButtonValue)
-                lastButtonValue = unld.Value
-            end
-            if rebirthStarted and unld.Value == tot.Value and not rebirthCooldown then
-                rebirthCooldown = true
-                rebirthCycleCount = rebirthCycleCount + 1
-                local cycleTime = tick() - (rebirthStartTime or tick())
-                if rebirthCycleCount > 1 then
-                    table.insert(rebirthData, {totalTime = cycleTime})
-                    if #rebirthData > MAX_REBIRTH_HISTORY then
-                        table.remove(rebirthData, 1)
-                    end
-                    updateStatsUI()
+        safeRun("main loop", function()
+            local bpObj = plr:FindFirstChild("ButtonProgress")
+            local unld = bpObj and bpObj:FindFirstChild("UnlockedButtons")
+            local tot = bpObj and bpObj:FindFirstChild("TotalButtons")
+            if unld and tot then
+                if unld.Value == 0 then
+                    rebirthStarted = false
+                    rebirthStartTime = nil
+                    buttonPressCount = 0
+                    lastButtonValue = 0
+                    rebirthCooldown = false
                 end
-                Library:Notify({
-                    Title = "Auto Rebirth",
-                    Description = string.format("Cycle complete in %.2fs (%d buttons)", cycleTime, buttonPressCount),
-                    Time = 3
-                })
-                rebirthStarted, rebirthStartTime, lastButtonValue, buttonPressCount = false, nil, 0, 0
-                if running then doRebirth() end
-                task.delay(REBIRTH_COOLDOWN_TIME, function()
-                    if Runtime.Alive then
-                        rebirthCooldown = false
+                if not rebirthStarted and unld.Value > 0 and not rebirthStartTime then
+                    rebirthStartTime = tick()
+                    rebirthStarted = true
+                    buttonPressCount = 1
+                    lastButtonValue = unld.Value
+                end
+                if rebirthStarted and unld.Value > lastButtonValue then
+                    buttonPressCount = buttonPressCount + (unld.Value - lastButtonValue)
+                    lastButtonValue = unld.Value
+                end
+                if rebirthStarted and unld.Value == tot.Value and not rebirthCooldown then
+                    rebirthCooldown = true
+                    rebirthCycleCount = rebirthCycleCount + 1
+                    local cycleTime = tick() - (rebirthStartTime or tick())
+                    if rebirthCycleCount > 1 then
+                        table.insert(rebirthData, {totalTime = cycleTime})
+                        if #rebirthData > MAX_REBIRTH_HISTORY then
+                            table.remove(rebirthData, 1)
+                        end
+                        updateStatsUI()
                     end
-                end)
+                    Library:Notify({
+                        Title = "Auto Rebirth",
+                        Description = string.format("Cycle complete in %.2fs (%d buttons)", cycleTime, buttonPressCount),
+                        Time = 3
+                    })
+                    rebirthStarted, rebirthStartTime, lastButtonValue, buttonPressCount = false, nil, 0, 0
+                    if running then doRebirth() end
+                    task.delay(REBIRTH_COOLDOWN_TIME, function()
+                        if Runtime.Alive then
+                            rebirthCooldown = false
+                        end
+                    end)
+                end
             end
-        end
 
-        local now = tick()
-        if now - lastDebrisScan >= 0.5 then
-            lastDebrisScan = now
-            teleportDebrisParts()
-        end
-        if now - lastWeatherCheck >= 5 then
-            lastWeatherCheck = now
-            skipWeatherEvent()
-        end
-
-        if running and not busy and not rebirthing then
-            busy = true
-            local myTycoon = Workspace:FindFirstChild("Map")
-                and Workspace.Map:FindFirstChild("Tycoons")
-                and Workspace.Map.Tycoons:FindFirstChild(plr.Name)
-            if myTycoon then
-                local button = findFirstValidBtn(myTycoon)
-                if button then bringBtnAndTrigger(button) end
+            local now = tick()
+            if now - lastDebrisScan >= 0.5 then
+                lastDebrisScan = now
+                teleportDebrisParts()
             end
-            busy = false
-        end
+            if now - lastWeatherCheck >= 5 then
+                lastWeatherCheck = now
+                skipWeatherEvent()
+            end
+
+            if running and not busy and not rebirthing then
+                busy = true
+                local myTycoon = Workspace:FindFirstChild("Map")
+                    and Workspace.Map:FindFirstChild("Tycoons")
+                    and Workspace.Map.Tycoons:FindFirstChild(plr.Name)
+                if myTycoon then
+                    local button = findFirstValidBtn(myTycoon)
+                    if button then bringBtnAndTrigger(button) end
+                end
+                busy = false
+            end
+        end)
+        busy = false
         task.wait(0.2)
     end
 end)
@@ -556,7 +576,7 @@ TglWeather:OnChanged(function(v) autoWeatherOn = v end)
 
 task.spawn(function()
     while Runtime.Alive do
-        updateStatsUI()
+        safeRun("stats update", updateStatsUI)
         task.wait(4)
     end
 end)
