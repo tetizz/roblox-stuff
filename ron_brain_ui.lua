@@ -2,7 +2,7 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-20.2"
+BrainUI.Version = "2026-06-20.4"
 BrainUI.UniversalUIVersion = "2026-06-19.6"
 
 local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/universal_ui.lua"
@@ -73,6 +73,16 @@ local UI = {
 	PageConnections = {},
 	RootConnections = {},
 	LastAction = { id = "refresh", title = "Refresh nation scan", risk = "Low" }
+}
+
+-- Auto-calibration for the Economy score. We don't know the real scale of
+-- RoN net income, so instead of guessing thresholds we grade the current net
+-- against a rolling window of values actually observed for THIS country.
+-- Falls back to the original binary logic until enough samples are gathered.
+local NetCalibration = {
+	samples = {},     -- rolling window of recent net values
+	maxSamples = 40,  -- ~30s of snapshots at the 0.75s dashboard cadence
+	country = nil     -- reset the window when the player switches country
 }
 
 local DashCountryLabel, DashFundsLabel, DashPoliticalLabel, DashCitiesLabel, DashTradeLabel, DashFlowLabel, DashWarsLabel
@@ -468,6 +478,49 @@ local function firstResourceProblem(myCountry, cities)
 	end
 end
 
+-- Record an observed net-income value for the given country and return a
+-- normalized grade of `value` against the rolling window: 1 = at/above the
+-- best observed, 0 = at/below the worst. Returns nil while warming up, so the
+-- caller can fall back to a safe default instead of acting on thin data.
+local function recordNetSample(countryName, value)
+	if type(value) ~= "number" then
+		return nil
+	end
+
+	-- Reset the window whenever the observed country changes, so a previous
+	-- nation's economy doesn't contaminate the current one's calibration.
+	if NetCalibration.country ~= countryName then
+		NetCalibration.country = countryName
+		NetCalibration.samples = {}
+	end
+
+	local samples = NetCalibration.samples
+	samples[#samples + 1] = value
+	while #samples > NetCalibration.maxSamples do
+		table.remove(samples, 1)
+	end
+
+	-- Warmup: not enough data to grade meaningfully yet.
+	if #samples < 8 then
+		return nil
+	end
+
+	local lo = samples[1]
+	local hi = lo
+	for i = 2, #samples do
+		local s = samples[i]
+		if s < lo then lo = s end
+		if s > hi then hi = s end
+	end
+
+	if hi == lo then
+		-- Flat window (e.g. income unchanged); call it middling.
+		return 0.5
+	end
+
+	return (value - lo) / (hi - lo)
+end
+
 local function buildBrainSnapshot()
 	local ok, myCountry = assertStillLeader()
 	if not ok then
@@ -519,9 +572,20 @@ local function buildBrainSnapshot()
 	local resourceRows = resourceFlowRows(myCountry, 5)
 	local problemResource = firstResourceProblem(myCountry, cities)
 
+	-- Economy: grade current net against this country's OWN observed range
+	-- (auto-calibrated, no guessed thresholds). Falls back to the original
+	-- binary logic during warmup or when net isn't readable, so this is never
+	-- worse than the previous behavior.
 	local economyScore = 65
 	if type(net) == "number" then
-		economyScore = net > 0 and 84 or 38
+		local grade = recordNetSample(myCountry.Name, net)
+		if grade == nil then
+			-- Warmup: keep the original binary default.
+			economyScore = net > 0 and 84 or 38
+		else
+			-- Calibrated: 38 (worst observed) .. 90 (best observed).
+			economyScore = 38 + grade * 52
+		end
 	end
 	if type(funds) == "number" and funds > 100000000 then
 		economyScore = economyScore + 8
