@@ -2,10 +2,10 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-19.9"
+BrainUI.Version = "2026-06-20.2"
 BrainUI.UniversalUIVersion = "2026-06-19.6"
 
-local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/7651b7fe029b5958acb6288dd758b300f024c3d0/universal_ui.lua"
+local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/universal_ui.lua"
 
 local function loadUniversalUI()
 	local ok, result = pcall(function()
@@ -47,6 +47,12 @@ function BrainUI.new(ctx)
 	local scanAndResupplyOnce = ctx.scanAndResupplyOnce
 	local attemptAutoBuildOnce = ctx.attemptAutoBuildOnce
 	local doAutoPolicy = ctx.doAutoPolicy
+	local attemptOneTrade = ctx.attemptOneTrade
+	local doAutoJustify = ctx.doAutoJustify
+	local doAutoDeclare = ctx.doAutoDeclare
+	local doAutoPeace = ctx.doAutoPeace
+	local doAutoAnnex = ctx.doAutoAnnex
+	local doAutoPromote = ctx.doAutoPromote
 	local safeNotify = ctx.safeNotify
 	local buildPolicyInfo = ctx.buildPolicyInfo
 
@@ -528,14 +534,39 @@ local function buildBrainSnapshot()
 	local politicsScore = clamp((stability or 70) - ((corruption or 0) * 0.5) + math.min(power / 25, 15), 0, 100)
 	local diplomacyScore = clamp(88 - wars * 16 - threats * 24, 0, 100)
 	local militaryScore = clamp(readiness or (wars > 0 and 70 or 82), 0, 100)
-	local scannerScore = 100
 	local plannerScore = clamp((economyScore + politicsScore + diplomacyScore + militaryScore) / 4, 0, 100)
 	local executorScore = 72
-	if CONFIG.TradeEnabled or CONFIG.AutoBuildEnabled or CONFIG.AutoResupplyEnabled or CONFIG.AutoPolicyEnabled then
+	-- Count every automation CONFIG flag that exists, so the Executor node
+	-- reflects what's actually running (not just 4 of them).
+	local executorActive = CONFIG.TradeEnabled
+		or CONFIG.AutoBuildEnabled
+		or CONFIG.AutoResupplyEnabled
+		or CONFIG.AutoPolicyEnabled
+		or CONFIG.AutoPromoteEnabled
+		or CONFIG.UnitTagsEnabled
+		or CONFIG.AutoJustifyEnabled
+		or CONFIG.AutoDeclareEnabled
+		or CONFIG.AutoPeaceEnabled
+		or CONFIG.AutoAnnexEnabled
+	if executorActive then
 		executorScore = 92
 	end
 
 	local warRisk = clamp(wars * 24 + threats * 32 + ((readiness and readiness < 50) and 20 or 0) + ((stability and stability < 45) and 20 or 0), 0, 100)
+
+	-- Scanner reflects real data coverage: how many of the key inputs
+	-- actually returned a number (vs nil/unknown). Reuses values already read.
+	local knownInputs = 0
+	local totalInputs = 7
+	if type(funds) == "number" then knownInputs = knownInputs + 1 end
+	if type(net) == "number" then knownInputs = knownInputs + 1 end
+	if type(power) == "number" then knownInputs = knownInputs + 1 end
+	if type(stability) == "number" then knownInputs = knownInputs + 1 end
+	if type(corruption) == "number" then knownInputs = knownInputs + 1 end
+	if type(readiness) == "number" then knownInputs = knownInputs + 1 end
+	if type(threats) == "number" then knownInputs = knownInputs + 1 end
+	local scannerScore = clamp((knownInputs / totalInputs) * 100, 0, 100)
+
 	local confidence = clamp((scannerScore + economyScore + politicsScore + diplomacyScore + militaryScore + plannerScore + executorScore) / 7, 0, 100)
 
 	local actions = {}
@@ -569,6 +600,17 @@ local function buildBrainSnapshot()
 		push("defense", "Keep defensive readiness", "Medium", "00:40", "Low")
 	else
 		push("trade", "Optimize trade network", "Medium", "00:45", "Low")
+	end
+	-- War/annex actions: surfaced only when relevant, driven by the proven
+	-- war count and the existing CONFIG flags (no guessing about game state).
+	if CONFIG.AutoAnnexEnabled and wars > 0 then
+		push("annex", "Annex winning wars", "High", "00:10", "Medium")
+	end
+	if CONFIG.AutoDeclareEnabled then
+		push("declare", "Declare on justified targets", "Medium", "00:25", "High")
+	end
+	if CONFIG.AutoPromoteEnabled then
+		push("promote", "Promote corrupt leaders", "Low", "00:30", "Low")
 	end
 	if #actions == 0 then
 		push("refresh", "Maintain current plan", "Low", "01:00", "Low")
@@ -877,6 +919,32 @@ local function executeBrainAction()
 	elseif action.id == "policy" then
 		doAutoPolicy()
 		safeNotify("Nation Brain", "Policy planner cycle executed", 3)
+	elseif action.id == "trade" and attemptOneTrade then
+		-- attemptOneTrade updates the trade status labels itself.
+		attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeValidList, TradeFlowSafetyLabel)
+		safeNotify("Nation Brain", "Trade cycle executed", 3)
+	elseif action.id == "economy" then
+		-- A deficit: resupply fixes resource drains, and a trade cycle
+		-- can raise export revenue. Run both if available.
+		scanAndResupplyOnce()
+		if attemptOneTrade then
+			attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeValidList, TradeFlowSafetyLabel)
+		end
+		safeNotify("Nation Brain", "Deficit relief cycle executed", 3)
+	elseif action.id == "annex" and doAutoAnnex then
+		doAutoAnnex()
+		safeNotify("Nation Brain", "Annex cycle executed", 3)
+	elseif action.id == "war-advisor" then
+		-- Conquest advisory: justify so a CB is ready, then declare if one is.
+		if doAutoJustify then doAutoJustify() end
+		if doAutoDeclare then doAutoDeclare() end
+		safeNotify("Nation Brain", "Conquest cycle executed", 3)
+	elseif action.id == "declare" and doAutoDeclare then
+		doAutoDeclare()
+		safeNotify("Nation Brain", "Declare cycle executed", 3)
+	elseif action.id == "promote" and doAutoPromote then
+		doAutoPromote()
+		safeNotify("Nation Brain", "Promote cycle executed", 3)
 	else
 		safeNotify("Nation Brain", tostring(action.title) .. " is advisor-only", 3)
 	end
@@ -1217,6 +1285,12 @@ local function renderWarPage()
 		end)
 		y = makeToggle(left, y, "Auto Peace", CONFIG.AutoPeaceEnabled, function(v)
 			CONFIG.AutoPeaceEnabled = v
+		end)
+		y = makeToggle(left, y, "Auto Annex (winning wars)", CONFIG.AutoAnnexEnabled, function(v)
+			CONFIG.AutoAnnexEnabled = v
+		end)
+		y = makeSlider(left, y, "Annex Extraction", CONFIG.AutoAnnexExtractionPercent, 0, 100, "%", function(v)
+			CONFIG.AutoAnnexExtractionPercent = v
 		end)
 		y = makeToggle(left, y, "Auto Promote Corrupt Leaders", CONFIG.AutoPromoteEnabled, function(v)
 			CONFIG.AutoPromoteEnabled = v

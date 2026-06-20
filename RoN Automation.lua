@@ -131,6 +131,9 @@ local CONFIG = {
 	AutoDeclareEnabled = false,
 	AutoPeaceEnabled = false,
 
+	AutoAnnexEnabled = false, -- annex-all PeaceOut when winning an offensive war
+	AutoAnnexExtractionPercent = 100, -- maps onto proven Money/Resource Percentage (0..100)
+
 	AutoPromoteEnabled = false, -- corrupt leader promote
 
 	BrainDashboardEnabled = true,
@@ -1174,6 +1177,7 @@ local War = {
 	Justified = {},
 	Declared = {},
 	ProcessedWars = {},
+	ProcessedAnnex = {},
 	LastStatus = "Idle"
 }
 
@@ -1364,6 +1368,80 @@ local function doAutoPeace()
 	end
 
 	War.LastStatus = "AutoPeace running"
+end
+
+--============================================================
+-- Auto Annex (annex-all PeaceOut when winning an offensive war)
+-- Reuses the proven PeaceOut signature from doAutoPeace, but with
+-- AnnexAll (annex everything the defender holds) instead of AnnexSome.
+--============================================================
+local function doAutoAnnex()
+	local ok, myCountry = assertStillLeader()
+	if not ok then
+		War.LastStatus = "Not leader"
+		return
+	end
+
+	local warsFolder = workspace:FindFirstChild("Wars")
+	if not warsFolder then
+		War.LastStatus = "No wars folder"
+		return
+	end
+
+	-- Clean up missing wars
+	for warName in pairs(War.ProcessedAnnex) do
+		if not warsFolder:FindFirstChild(warName) then
+			War.ProcessedAnnex[warName] = nil
+		end
+	end
+
+	local extraction = tonumber(CONFIG.AutoAnnexExtractionPercent) or 100
+	if extraction < 0 then extraction = 0 end
+	if extraction > 100 then extraction = 100 end
+
+	local sent = 0
+	for _, war in ipairs(warsFolder:GetChildren()) do
+		local warName = war.Name
+		if not War.ProcessedAnnex[warName] then
+			local attacker = war:FindFirstChild("Attacker")
+			if attacker and attacker:FindFirstChild(myCountry.Name) then
+				local defender = war:FindFirstChild("Defender")
+				local allSent = true
+				if defender then
+					for _, def in ipairs(defender:GetChildren()) do
+						local defName = def.Name
+						-- Skip annexing countries that hold no cities (nothing to take).
+						if countryHasAtLeastOneCity(defName) then
+							local args = {
+								defName,
+								"PeaceOut",
+								{
+									warName,
+									"Demand",
+									{
+										AnnexAll = {},
+										Money = { Percentage = extraction },
+										Resource = { Percentage = extraction }
+									}
+								}
+							}
+							if safeFireServer("PeaceOut (Annex)", ManageAlliance, unpack(args)) then
+								sent = sent + 1
+								debugPrint("[War]", ("Annex PeaceOut to %s for '%s' (%d%%)"):format(defName, warName, extraction))
+							else
+								allSent = false
+							end
+						end
+					end
+				end
+				if allSent then
+					War.ProcessedAnnex[warName] = true
+				end
+			end
+		end
+	end
+
+	War.LastStatus = "AutoAnnex sent: " .. tostring(sent)
 end
 
 --============================================================
@@ -1926,8 +2004,8 @@ end
 --============================================================
 -- Nation Brain UI Library
 --============================================================
-local RequiredBrainUIVersion = "2026-06-19.9"
-local BrainUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/0bceeab0e461ba1518be8756b1d70a8989e1785d/ron_brain_ui.lua"
+local RequiredBrainUIVersion = "2026-06-20.2"
+local BrainUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua"
 
 local function makeHeadlessStatus(text)
 	local obj = { Text = text or "" }
@@ -2033,7 +2111,13 @@ local function loadBrainUI()
 			computeTotalNeedByResource = computeTotalNeedByResource,
 			scanAndResupplyOnce = scanAndResupplyOnce,
 			attemptAutoBuildOnce = attemptAutoBuildOnce,
+			attemptOneTrade = attemptOneTrade,
 			doAutoPolicy = doAutoPolicy,
+			doAutoJustify = doAutoJustify,
+			doAutoDeclare = doAutoDeclare,
+			doAutoPeace = doAutoPeace,
+			doAutoAnnex = doAutoAnnex,
+			doAutoPromote = doAutoPromote,
 			safeNotify = safeNotify,
 			buildPolicyInfo = buildPolicyInfo
 		})
@@ -2193,6 +2277,12 @@ task.spawn(function()
 		if CONFIG.AutoPeaceEnabled then
 			runEvery("auto_peace", 1.0, function()
 				doAutoPeace()
+				WarStatusLabel:SetText("Auto Wars: " .. War.LastStatus)
+			end)
+		end
+		if CONFIG.AutoAnnexEnabled then
+			runEvery("auto_annex", 1.0, function()
+				doAutoAnnex()
 				WarStatusLabel:SetText("Auto Wars: " .. War.LastStatus)
 			end)
 		end
