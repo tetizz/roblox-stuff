@@ -2,7 +2,7 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-20.6"
+BrainUI.Version = "2026-06-20.7"
 BrainUI.UniversalUIVersion = "2026-06-19.6"
 
 local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/universal_ui.lua"
@@ -510,6 +510,11 @@ local function buildBrainSnapshot()
 			wars = 0,
 			threats = 0,
 			confidence = 0,
+			inRecovery = false,
+			cascade = false,
+			recoveryProgress = 0,
+			resourceNeeds = {},
+			starvedCount = 0,
 			goal = "Waiting for country leadership",
 			goalProgress = 0,
 			nextAction = { id = "refresh", title = "Wait for leader data", priority = "Low", eta = "00:05", risk = "Low" },
@@ -548,6 +553,17 @@ local function buildBrainSnapshot()
 	local resourceRows = resourceFlowRows(myCountry, 5)
 	local problemResource = firstResourceProblem(myCountry, cities)
 
+	-- Full map of resources starved by non-operational buildings {name=need}.
+	-- Computed once; used to diagnose the deficit cascade (negative balance ->
+	-- imports cancel -> factories stop) and to drive recovery actions.
+	local resourceNeeds = computeTotalNeedByResource(cities)
+	local starvedCount = 0
+	local starvedTotal = 0
+	for _, need in pairs(resourceNeeds) do
+		starvedCount = starvedCount + 1
+		starvedTotal = starvedTotal + (tonumber(need) or 0)
+	end
+
 	-- Economy: logarithmic curve over net income, anchored to real RoN scale
 	-- (50K ~= struggling, 1M ~= strong). See netIncomeScore for the math.
 	local economyScore = netIncomeScore(net)
@@ -562,7 +578,10 @@ local function buildBrainSnapshot()
 	-- Recovery mode: active when running a net-income deficit. The deeper the
 	-- deficit, the lower the recovery progress (how far back to breakeven).
 	-- DEFICIT_DEEP matches the economy curve's deficit floor (~-20K -> 0).
+	-- When factories are ALSO starved, we're in the import-collapse cascade:
+	-- negative balance -> incoming trades cancel -> factories stop producing.
 	local inRecovery = type(net) == "number" and net < 0
+	local cascade = inRecovery and starvedCount > 0
 	local recoveryProgress = 0
 	if inRecovery then
 		local DEFICIT_DEEP = 20000
@@ -618,10 +637,15 @@ local function buildBrainSnapshot()
 		}
 	end
 
-	-- In recovery mode, deficit relief leads the queue; resupply follows.
-	-- (Both map to proven Execute Now handlers: economy -> resupply+trade,
-	--  resupply -> scanAndResupplyOnce.)
-	if inRecovery then
+	-- Recovery / cascade actions lead the queue.
+	-- Cascade = deficit has canceled incoming trades, starving factories.
+	-- Proven handlers: economy -> resupply+trade, resupply -> scanAndResupplyOnce.
+	if cascade then
+		-- Imports cancelled: resupply first to restart the starved factories,
+		-- then a trade cycle to rebuild export revenue.
+		push("resupply", "Resupply cancelled imports (" .. tostring(starvedCount) .. " resources)", "High", "00:08", "Medium")
+		push("economy", "Rebuild export revenue", "High", "00:12", "Medium")
+	elseif inRecovery then
 		push("economy", "Run recovery cycle (resupply + trade)", "High", "00:10", "Medium")
 	end
 	if problemResource then
@@ -691,7 +715,10 @@ local function buildBrainSnapshot()
 		threats = threats,
 		confidence = confidence,
 		inRecovery = inRecovery,
+		cascade = cascade,
 		recoveryProgress = recoveryProgress,
+		resourceNeeds = resourceNeeds,
+		starvedCount = starvedCount,
 		goal = goal,
 		goalProgress = clamp(goalProgress, 0, 100),
 		nextAction = actions[1],
@@ -1638,9 +1665,14 @@ function updateBrainUI()
 	end
 
 	if UI.Brain.State then
-		if snap.inRecovery then
-			UI.Brain.State.Text = "RECOVERY"
+		if snap.cascade then
+			-- Import-collapse cascade: deficit has canceled incoming trades and
+			-- now factories are starving -> can't produce -> can't earn out.
+			UI.Brain.State.Text = "CASCADE"
 			UI.Brain.State.TextColor3 = C.red
+		elseif snap.inRecovery then
+			UI.Brain.State.Text = "RECOVERY"
+			UI.Brain.State.TextColor3 = C.amber
 		else
 			UI.Brain.State.Text = snap.online and "ACTIVE" or "WAITING"
 			UI.Brain.State.TextColor3 = snap.online and C.green or C.amber
@@ -1661,13 +1693,19 @@ function updateBrainUI()
 	end
 	if UI.Brain.Goal then
 		-- A deficit is an emergency that supersedes the chosen strategy goal.
-		UI.Brain.Goal.Text = snap.inRecovery and "Recover economy (deficit)" or snap.goal
+		if snap.cascade then
+			UI.Brain.Goal.Text = "Restart production (imports cancelled)"
+		elseif snap.inRecovery then
+			UI.Brain.Goal.Text = "Recover economy (deficit)"
+		else
+			UI.Brain.Goal.Text = snap.goal
+		end
 	end
 	if UI.Brain.GoalBar then
 		setBar(UI.Brain.GoalBar, snap.inRecovery and snap.recoveryProgress or snap.goalProgress)
-		-- Flag the bar red while in recovery, green otherwise.
+		-- Flag the bar red during the cascade, amber during plain recovery.
 		if UI.Brain.GoalBar.Fill then
-			UI.Brain.GoalBar.Fill.BackgroundColor3 = snap.inRecovery and C.red or C.green
+			UI.Brain.GoalBar.Fill.BackgroundColor3 = snap.cascade and C.red or (snap.inRecovery and C.amber or C.green)
 		end
 	end
 	if UI.Brain.GoalValue then
@@ -1693,7 +1731,19 @@ function updateBrainUI()
 		setBar(UI.Brain.ConfidenceBar, snap.confidence)
 	end
 	if UI.Brain.NextAction then
-		UI.Brain.NextAction.Text = "Next: " .. tostring(snap.nextAction.title)
+		local suffix = ""
+		if snap.cascade then
+			-- Show which resources the cancelled imports have starved.
+			local needs = snap.resourceNeeds or {}
+			local parts = {}
+			for name, need in pairs(needs) do
+				parts[#parts + 1] = tostring(name) .. " " .. tostring(math.floor(tonumber(need) or 0))
+			end
+			if #parts > 0 then
+				suffix = "  |  Starved: " .. table.concat(parts, ", ")
+			end
+		end
+		UI.Brain.NextAction.Text = "Next: " .. tostring(snap.nextAction.title) .. suffix
 	end
 	if UI.Brain.NextRisk then
 		UI.Brain.NextRisk.Text = "ETA: " .. tostring(snap.nextAction.eta) .. "  |  Risk: " .. tostring(snap.nextAction.risk)
