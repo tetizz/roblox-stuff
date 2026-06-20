@@ -2,7 +2,7 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-20.5"
+BrainUI.Version = "2026-06-20.6"
 BrainUI.UniversalUIVersion = "2026-06-19.6"
 
 local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/universal_ui.lua"
@@ -559,6 +559,16 @@ local function buildBrainSnapshot()
 	end
 	economyScore = clamp(economyScore, 0, 100)
 
+	-- Recovery mode: active when running a net-income deficit. The deeper the
+	-- deficit, the lower the recovery progress (how far back to breakeven).
+	-- DEFICIT_DEEP matches the economy curve's deficit floor (~-20K -> 0).
+	local inRecovery = type(net) == "number" and net < 0
+	local recoveryProgress = 0
+	if inRecovery then
+		local DEFICIT_DEEP = 20000
+		recoveryProgress = clamp(100 - (math.abs(net) / DEFICIT_DEEP) * 100, 0, 100)
+	end
+
 	local politicsScore = clamp((stability or 70) - ((corruption or 0) * 0.5) + math.min(power / 25, 15), 0, 100)
 	local diplomacyScore = clamp(88 - wars * 16 - threats * 24, 0, 100)
 	local militaryScore = clamp(readiness or (wars > 0 and 70 or 82), 0, 100)
@@ -608,11 +618,14 @@ local function buildBrainSnapshot()
 		}
 	end
 
+	-- In recovery mode, deficit relief leads the queue; resupply follows.
+	-- (Both map to proven Execute Now handlers: economy -> resupply+trade,
+	--  resupply -> scanAndResupplyOnce.)
+	if inRecovery then
+		push("economy", "Run recovery cycle (resupply + trade)", "High", "00:10", "Medium")
+	end
 	if problemResource then
 		push("resupply", "Resupply " .. tostring(problemResource), "High", "00:12", "Low")
-	end
-	if type(net) == "number" and net < 0 then
-		push("economy", "Reduce deficit pressure", "High", "00:18", "Medium")
 	end
 	if CONFIG.AutoBuildEnabled then
 		push("build", "Run build planner cycle", "Medium", "00:20", "Low")
@@ -677,6 +690,8 @@ local function buildBrainSnapshot()
 		wars = wars,
 		threats = threats,
 		confidence = confidence,
+		inRecovery = inRecovery,
+		recoveryProgress = recoveryProgress,
 		goal = goal,
 		goalProgress = clamp(goalProgress, 0, 100),
 		nextAction = actions[1],
@@ -1623,8 +1638,13 @@ function updateBrainUI()
 	end
 
 	if UI.Brain.State then
-		UI.Brain.State.Text = snap.online and "ACTIVE" or "WAITING"
-		UI.Brain.State.TextColor3 = snap.online and C.green or C.amber
+		if snap.inRecovery then
+			UI.Brain.State.Text = "RECOVERY"
+			UI.Brain.State.TextColor3 = C.red
+		else
+			UI.Brain.State.Text = snap.online and "ACTIVE" or "WAITING"
+			UI.Brain.State.TextColor3 = snap.online and C.green or C.amber
+		end
 	end
 	for name, score in pairs(snap.nodes) do
 		local node = UI.Brain[name]
@@ -1640,13 +1660,19 @@ function updateBrainUI()
 		UI.Brain.Strategy.Text = CONFIG.BrainStrategyMode
 	end
 	if UI.Brain.Goal then
-		UI.Brain.Goal.Text = snap.goal
+		-- A deficit is an emergency that supersedes the chosen strategy goal.
+		UI.Brain.Goal.Text = snap.inRecovery and "Recover economy (deficit)" or snap.goal
 	end
 	if UI.Brain.GoalBar then
-		setBar(UI.Brain.GoalBar, snap.goalProgress)
+		setBar(UI.Brain.GoalBar, snap.inRecovery and snap.recoveryProgress or snap.goalProgress)
+		-- Flag the bar red while in recovery, green otherwise.
+		if UI.Brain.GoalBar.Fill then
+			UI.Brain.GoalBar.Fill.BackgroundColor3 = snap.inRecovery and C.red or C.green
+		end
 	end
 	if UI.Brain.GoalValue then
-		UI.Brain.GoalValue.Text = tostring(math.floor(snap.goalProgress + 0.5)) .. "/100"
+		local gp = snap.inRecovery and snap.recoveryProgress or snap.goalProgress
+		UI.Brain.GoalValue.Text = tostring(math.floor(gp + 0.5)) .. "/100"
 	end
 	for i = 1, 5 do
 		local row = UI.QueueRows[i]
