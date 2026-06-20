@@ -2,7 +2,7 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-20.3"
+BrainUI.Version = "2026-06-20.2"
 BrainUI.UniversalUIVersion = "2026-06-19.6"
 
 local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/universal_ui.lua"
@@ -519,48 +519,21 @@ local function buildBrainSnapshot()
 	local resourceRows = resourceFlowRows(myCountry, 5)
 	local problemResource = firstResourceProblem(myCountry, cities)
 
-	-- Economy: continuous curve instead of the old net>0->84 / net<=0->38 jump.
-	-- Base 55; rewarded for surplus (scaled by funds depth), penalized for
-	-- deficits and resource shortages. All inputs already read above.
-	local economyScore = 55
+	local economyScore = 65
 	if type(net) == "number" then
-		if net > 0 then
-			-- Surplus: up to +35 for a healthy cushion, capped.
-			local surplusWeight = math.min(net / 5000, 1)
-			economyScore = economyScore + surplusWeight * 35
-		else
-			-- Deficit: up to -30 the deeper it goes.
-			local deficitWeight = math.min(math.abs(net) / 5000, 1)
-			economyScore = economyScore - deficitWeight * 30
-		end
+		economyScore = net > 0 and 84 or 38
 	end
-	if type(funds) == "number" then
-		-- Deeper reserves raise the floor; clamped to a +12 ceiling.
-		local fundsWeight = math.min(funds / 100000000, 1)
-		economyScore = economyScore + fundsWeight * 12
+	if type(funds) == "number" and funds > 100000000 then
+		economyScore = economyScore + 8
 	end
 	if problemResource then
 		economyScore = economyScore - 12
 	end
 	economyScore = clamp(economyScore, 0, 100)
 
-	-- Politics: stability minus corruption drag, with political-power support.
-	-- (Kept continuous as before, just clarified.)
 	local politicsScore = clamp((stability or 70) - ((corruption or 0) * 0.5) + math.min(power / 25, 15), 0, 100)
-
-	-- Diplomacy: start at a clean 100 and decay smoothly per active war /
-	-- threat, instead of the old hard-coded 88 start.
-	local diplomacyScore = clamp(100 - wars * 16 - threats * 24, 0, 100)
-
-	-- Military: readiness drives the score continuously; wars raise the floor
-	-- (a nation at war shouldn't read as idle), peacetime defaults higher.
-	local militaryScore
-	if type(readiness) == "number" then
-		militaryScore = clamp(readiness, 0, 100)
-	else
-		militaryScore = wars > 0 and 70 or 82
-	end
-
+	local diplomacyScore = clamp(88 - wars * 16 - threats * 24, 0, 100)
+	local militaryScore = clamp(readiness or (wars > 0 and 70 or 82), 0, 100)
 	local plannerScore = clamp((economyScore + politicsScore + diplomacyScore + militaryScore) / 4, 0, 100)
 	local executorScore = 72
 	-- Count every automation CONFIG flag that exists, so the Executor node
