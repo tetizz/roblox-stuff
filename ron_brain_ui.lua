@@ -2,7 +2,7 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-20.10"
+BrainUI.Version = "2026-06-20.11"
 BrainUI.UniversalUIVersion = "2026-06-19.6"
 
 local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/universal_ui.lua"
@@ -59,6 +59,8 @@ function BrainUI.new(ctx)
 
 	local UniversalUI = ctx.UniversalUI or loadUniversalUI()
 	local Primitives = UniversalUI and UniversalUI.Primitives
+	local TweenService = game:GetService("TweenService")
+	local RunService = game:GetService("RunService")
 
 	local updateBrainUI
 -- Custom Nation Brain UI
@@ -73,6 +75,7 @@ local UI = {
 	Cards = {},
 	PageConnections = {},
 	RootConnections = {},
+	Animations = {},
 	LastAction = { id = "refresh", title = "Refresh nation scan", risk = "Low" }
 }
 
@@ -280,6 +283,240 @@ local function disconnectConnections(list)
 	end
 end
 
+local function resetPageAnimations()
+	UI.Animations = {
+		Time = 0,
+		Lines = {},
+		Particles = {},
+		Dots = {},
+		Nodes = {},
+		Orbits = {},
+		QueueRows = {},
+		Cards = {}
+	}
+end
+
+resetPageAnimations()
+
+local function tweenObject(obj, duration, props, easingStyle, easingDirection)
+	if not obj or not obj.Parent then
+		return
+	end
+	local ok = pcall(function()
+		local tween = TweenService:Create(
+			obj,
+			TweenInfo.new(duration or 0.18, easingStyle or Enum.EasingStyle.Quad, easingDirection or Enum.EasingDirection.Out),
+			props
+		)
+		tween:Play()
+	end)
+	if not ok then
+		for key, value in pairs(props or {}) do
+			pcall(function()
+				obj[key] = value
+			end)
+		end
+	end
+end
+
+local function registerAnimatedLine(line, minTransparency, maxTransparency, speed, phase)
+	if line then
+		UI.Animations.Lines[#UI.Animations.Lines + 1] = {
+			Object = line,
+			Min = minTransparency or 0.05,
+			Max = maxTransparency or 0.65,
+			Speed = speed or 1,
+			Phase = phase or 0
+		}
+	end
+	return line
+end
+
+local function registerFlowParticle(parent, x1, y1, x2, y2, color, speed, phase, size)
+	local dot = inst("Frame", {
+		BackgroundColor3 = color or C.blue,
+		BackgroundTransparency = 0.05,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(x1, y1),
+		Size = UDim2.fromOffset(size or 6, size or 6),
+		ZIndex = 8,
+		Parent = parent
+	})
+	corner(dot, 8)
+	UI.Animations.Particles[#UI.Animations.Particles + 1] = {
+		Object = dot,
+		From = Vector2.new(x1, y1),
+		To = Vector2.new(x2, y2),
+		Speed = speed or 0.28,
+		Phase = phase or 0
+	}
+	return dot
+end
+
+local function makeAnimatedLine(parent, x1, y1, x2, y2, color, thickness, transparency, phase)
+	local line = makeLine(parent, x1, y1, x2, y2, color, thickness, transparency)
+	registerAnimatedLine(line, 0.05, 0.6, 1.2, phase or 0)
+	registerFlowParticle(parent, x1, y1, x2, y2, color, 0.24, phase or 0, 5)
+	return line
+end
+
+local function registerPulseDot(dot, minSize, maxSize, speed, phase)
+	if dot then
+		UI.Animations.Dots[#UI.Animations.Dots + 1] = {
+			Object = dot,
+			BasePosition = dot.Position,
+			MinSize = minSize or 4,
+			MaxSize = maxSize or 7,
+			Speed = speed or 1,
+			Phase = phase or 0
+		}
+	end
+	return dot
+end
+
+local function registerNode(node, strokeObj, phase)
+	if node then
+		UI.Animations.Nodes[#UI.Animations.Nodes + 1] = {
+			Frame = node,
+			Stroke = strokeObj,
+			BaseTransparency = node.BackgroundTransparency,
+			Phase = phase or 0
+		}
+	end
+	return node
+end
+
+local function registerOrbit(parent, centerX, centerY, radiusX, radiusY, color, speed, phase)
+	local dot = inst("Frame", {
+		BackgroundColor3 = color or C.blue,
+		BackgroundTransparency = 0.08,
+		BorderSizePixel = 0,
+		Size = UDim2.fromOffset(7, 7),
+		ZIndex = 9,
+		Parent = parent
+	})
+	corner(dot, 7)
+	UI.Animations.Orbits[#UI.Animations.Orbits + 1] = {
+		Object = dot,
+		Center = Vector2.new(centerX, centerY),
+		Radius = Vector2.new(radiusX, radiusY),
+		Speed = speed or 0.7,
+		Phase = phase or 0
+	}
+	return dot
+end
+
+local function registerQueueRow(frame, index)
+	if frame then
+		UI.Animations.QueueRows[#UI.Animations.QueueRows + 1] = {
+			Frame = frame,
+			Index = index or 1
+		}
+	end
+	return frame
+end
+
+local function registerAnimatedCard(panel, index)
+	if panel then
+		UI.Animations.Cards[#UI.Animations.Cards + 1] = {
+			Frame = panel,
+			Stroke = panel:FindFirstChildOfClass("UIStroke"),
+			Index = index or 1
+		}
+	end
+	return panel
+end
+
+local function animateDashboard(dt)
+	if not UI.Screen or not UI.Screen.Parent or not UI.Page or UI.ActiveTab ~= "Dashboard" or not CONFIG.BrainDashboardEnabled then
+		return
+	end
+
+	local anim = UI.Animations
+	anim.Time = (anim.Time or 0) + (dt or 0.016)
+	local t = anim.Time
+	local danger = UI.LastCascade or UI.LastInRecovery
+	local guard = UI.LastGuardState
+	local accent = danger and C.red or (guard and C.amber or C.blue)
+
+	for _, item in ipairs(anim.Lines or {}) do
+		local obj = item.Object
+		if obj and obj.Parent then
+			local alpha = (math.sin(t * item.Speed + item.Phase) + 1) * 0.5
+			obj.BackgroundTransparency = item.Min + (item.Max - item.Min) * alpha
+			obj.BackgroundColor3 = accent
+		end
+	end
+
+	for _, item in ipairs(anim.Particles or {}) do
+		local obj = item.Object
+		if obj and obj.Parent then
+			local alpha = (t * item.Speed + item.Phase) % 1
+			local pos = item.From + (item.To - item.From) * alpha
+			obj.Position = UDim2.fromOffset(pos.X - obj.AbsoluteSize.X / 2, pos.Y - obj.AbsoluteSize.Y / 2)
+			obj.BackgroundColor3 = accent
+			obj.BackgroundTransparency = 0.08 + 0.45 * math.abs(alpha - 0.5) * 2
+		end
+	end
+
+	for _, item in ipairs(anim.Dots or {}) do
+		local obj = item.Object
+		if obj and obj.Parent then
+			local alpha = (math.sin(t * item.Speed + item.Phase) + 1) * 0.5
+			local size = item.MinSize + (item.MaxSize - item.MinSize) * alpha
+			obj.Size = UDim2.fromOffset(size, size)
+			obj.Position = item.BasePosition + UDim2.fromOffset(-(size - item.MinSize) / 2, -(size - item.MinSize) / 2)
+			obj.BackgroundTransparency = 0.08 + 0.25 * (1 - alpha)
+			obj.BackgroundColor3 = accent
+		end
+	end
+
+	for _, item in ipairs(anim.Orbits or {}) do
+		local obj = item.Object
+		if obj and obj.Parent then
+			local a = t * item.Speed + item.Phase
+			local x = item.Center.X + math.cos(a) * item.Radius.X
+			local y = item.Center.Y + math.sin(a) * item.Radius.Y
+			obj.Position = UDim2.fromOffset(x - 3, y - 3)
+			obj.BackgroundColor3 = accent
+		end
+	end
+
+	for _, item in ipairs(anim.Nodes or {}) do
+		local frame = item.Frame
+		if frame and frame.Parent then
+			local alpha = (math.sin(t * 1.4 + item.Phase) + 1) * 0.5
+			frame.BackgroundTransparency = (item.BaseTransparency or 0) + 0.06 * alpha
+			if item.Stroke and item.Stroke.Parent then
+				item.Stroke.Transparency = 0.12 + 0.32 * (1 - alpha)
+			end
+		end
+	end
+
+	for _, item in ipairs(anim.QueueRows or {}) do
+		local frame = item.Frame
+		if frame and frame.Parent then
+			local alpha = (math.sin(t * 1.1 + item.Index * 0.6) + 1) * 0.5
+			frame.BackgroundTransparency = 0.72 + 0.08 * alpha
+		end
+	end
+
+	for _, item in ipairs(anim.Cards or {}) do
+		local strokeObj = item.Stroke
+		if strokeObj and strokeObj.Parent then
+			local alpha = (math.sin(t * 0.9 + item.Index * 0.4) + 1) * 0.5
+			strokeObj.Transparency = 0.32 + 0.18 * alpha
+		end
+	end
+end
+
+local function startAnimationLoop()
+	if UI.AnimationConnection then
+		return
+	end
+	UI.AnimationConnection = trackRootConnection(RunService.Heartbeat:Connect(animateDashboard))
+end
+
 local function installGlobalCleanup()
 	if _G and type(_G.RoNNationBrainCleanup) == "function" then
 		pcall(_G.RoNNationBrainCleanup)
@@ -290,6 +527,8 @@ local function installGlobalCleanup()
 			disconnectConnections(UI.RootConnections)
 			UI.PageConnections = {}
 			UI.RootConnections = {}
+			UI.AnimationConnection = nil
+			resetPageAnimations()
 			if UI.Screen and UI.Screen.Parent then
 				UI.Screen:Destroy()
 			end
@@ -300,7 +539,7 @@ end
 local function setBar(bar, value)
 	if not bar or not bar.Fill then return end
 	value = clamp(value, 0, 100)
-	bar.Fill.Size = UDim2.new(value / 100, 0, 1, 0)
+	tweenObject(bar.Fill, 0.28, { Size = UDim2.new(value / 100, 0, 1, 0) })
 	if bar.Text then
 		bar.Text.Text = tostring(math.floor(value + 0.5)) .. "%"
 	end
@@ -781,9 +1020,54 @@ local function makeProgress(parent, pos, size, color)
 	return { Root = outer, Fill = fill }
 end
 
+local function attachButtonAnimation(button)
+	if not button or not button.Parent then
+		return button
+	end
+
+	local baseColor = button.BackgroundColor3
+	local hoverColor = Color3.fromRGB(19, 58, 94)
+	local pressColor = Color3.fromRGB(28, 91, 143)
+	local baseText = button.TextColor3
+	local hoverText = Color3.fromRGB(175, 216, 255)
+	local baseSize = button.Size
+	local basePosition = button.Position
+	local pressSize = UDim2.new(baseSize.X.Scale, baseSize.X.Offset - 2, baseSize.Y.Scale, baseSize.Y.Offset - 2)
+	local pressPosition = UDim2.new(basePosition.X.Scale, basePosition.X.Offset + 1, basePosition.Y.Scale, basePosition.Y.Offset + 1)
+
+	trackPageConnection(button.MouseEnter:Connect(function()
+		tweenObject(button, 0.16, {
+			BackgroundColor3 = hoverColor,
+			TextColor3 = hoverText
+		})
+	end))
+	trackPageConnection(button.MouseLeave:Connect(function()
+		tweenObject(button, 0.2, {
+			BackgroundColor3 = baseColor,
+			TextColor3 = baseText
+		})
+	end))
+	trackPageConnection(button.MouseButton1Down:Connect(function()
+		tweenObject(button, 0.08, {
+			BackgroundColor3 = pressColor,
+			Size = pressSize,
+			Position = pressPosition
+		}, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	end))
+	trackPageConnection(button.MouseButton1Up:Connect(function()
+		tweenObject(button, 0.1, {
+			BackgroundColor3 = hoverColor,
+			Size = baseSize,
+			Position = basePosition
+		}, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+	end))
+
+	return button
+end
+
 local function makeButton(parent, text, pos, size, callback)
 	if Primitives and Primitives.button then
-		return Primitives.button(parent, text, pos, size, callback, C, { Connections = UI.PageConnections })
+		return attachButtonAnimation(Primitives.button(parent, text, pos, size, callback, C, { Connections = UI.PageConnections }))
 	end
 	local button = inst("TextButton", {
 		BackgroundColor3 = Color3.fromRGB(14, 45, 76),
@@ -801,7 +1085,7 @@ local function makeButton(parent, text, pos, size, callback)
 	trackPageConnection(button.MouseButton1Click:Connect(function()
 		runUICallback(callback)
 	end))
-	return button
+	return attachButtonAnimation(button)
 end
 
 local function makeToggle(parent, y, text, value, callback)
@@ -970,6 +1254,7 @@ local function clearPage()
 	if not UI.Page then return end
 	disconnectConnections(UI.PageConnections)
 	UI.PageConnections = {}
+	resetPageAnimations()
 	for _, child in ipairs(UI.Page:GetChildren()) do
 		child:Destroy()
 	end
@@ -1066,6 +1351,9 @@ local function renderDashboardPage()
 	corner(center, 52)
 	stroke(center, C.blue, 0.1, 2)
 	makeText(center, "BRAIN", UDim2.fromOffset(0, 39), UDim2.fromOffset(140, 26), 20, C.blue, true).TextXAlignment = Enum.TextXAlignment.Center
+	registerNode(center, center:FindFirstChildOfClass("UIStroke"), 0)
+	registerOrbit(model, 340, 250, 112, 72, C.blue, 0.9, 0)
+	registerOrbit(model, 340, 250, 95, 58, C.green, -0.7, 1.8)
 
 	local points = {
 		{ 24, 28 }, { 52, 18 }, { 86, 25 }, { 113, 42 }, { 102, 74 },
@@ -1083,6 +1371,7 @@ local function renderDashboardPage()
 			Parent = center
 		})
 		corner(dot, 5)
+		registerPulseDot(dot, 5, 8, 2.2, p[1] * 0.05 + p[2] * 0.03)
 	end
 
 	local nodeInfo = {
@@ -1095,11 +1384,11 @@ local function renderDashboardPage()
 		{ "Executor", "Action Control", 420, 375, "EXE" }
 	}
 
-	makeLine(model, 340, 195, 340, 125, C.blue, 2, 0.05)
-	makeLine(model, 270, 250, 205, 250, C.blue, 2, 0.05)
-	makeLine(model, 410, 250, 505, 250, C.blue, 2, 0.05)
-	makeLine(model, 306, 305, 242, 375, C.blue, 2, 0.05)
-	makeLine(model, 385, 305, 470, 375, C.blue, 2, 0.05)
+	makeAnimatedLine(model, 340, 195, 340, 125, C.blue, 2, 0.05, 0.0)
+	makeAnimatedLine(model, 270, 250, 205, 250, C.blue, 2, 0.05, 0.3)
+	makeAnimatedLine(model, 410, 250, 505, 250, C.blue, 2, 0.05, 0.6)
+	makeAnimatedLine(model, 306, 305, 242, 375, C.blue, 2, 0.05, 0.9)
+	makeAnimatedLine(model, 385, 305, 470, 375, C.blue, 2, 0.05, 1.2)
 	makeDashedLine(model, 215, 145, 302, 100, C.green)
 	makeDashedLine(model, 458, 100, 540, 145, C.green)
 	makeDashedLine(model, 145, 265, 166, 375, C.green)
@@ -1116,6 +1405,7 @@ local function renderDashboardPage()
 		makeText(node, sub, UDim2.fromOffset(58, 33), UDim2.fromOffset(84, 18), 11, C.muted, false)
 		local pct = makeText(node, "0%", UDim2.fromOffset(58, 52), UDim2.fromOffset(84, 18), 13, C.green, true)
 		UI.Brain[name] = { Frame = node, Percent = pct, Stroke = node:FindFirstChildOfClass("UIStroke") }
+		registerNode(node, UI.Brain[name].Stroke, x * 0.01 + y * 0.007)
 	end
 
 	makeText(model, "Data Flow", UDim2.fromOffset(230, 438), UDim2.fromOffset(95, 20), 12, C.muted, false)
@@ -1133,6 +1423,17 @@ local function renderDashboardPage()
 	for i = 1, 5 do
 		local y = 222 + (i - 1) * 28
 		makeText(right, tostring(i), UDim2.fromOffset(18, y), UDim2.fromOffset(20, 24), 12, C.muted, false)
+		local rowBg = inst("Frame", {
+			BackgroundColor3 = Color3.fromRGB(15, 31, 45),
+			BackgroundTransparency = 0.78,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(12, y + 2),
+			Size = UDim2.fromOffset(338, 22),
+			ZIndex = 0,
+			Parent = right
+		})
+		corner(rowBg, 4)
+		registerQueueRow(rowBg, i)
 		local title = makeText(right, "-", UDim2.fromOffset(45, y), UDim2.fromOffset(210, 24), 12, C.text, false)
 		local priority = makeText(right, "-", UDim2.fromOffset(255, y), UDim2.fromOffset(58, 24), 12, C.amber, false)
 		local eta = makeText(right, "-", UDim2.fromOffset(315, y), UDim2.fromOffset(42, 24), 12, C.muted, false)
@@ -1165,6 +1466,7 @@ local function renderDashboardPage()
 		local x = (i - 1) * 164
 		if i >= 5 then x = x + 46 end
 		local panel = makePanel(bottom, UDim2.fromOffset(x, 0), UDim2.fromOffset(w, 125), card[2] .. "Card")
+		registerAnimatedCard(panel, i)
 		makeText(panel, string.upper(card[1]), UDim2.fromOffset(14, 12), UDim2.fromOffset(w - 28, 18), 11, C.text, true)
 		UI.Cards[card[2]] = {
 			Value = makeText(panel, "?", UDim2.fromOffset(14, 40), UDim2.fromOffset(w - 28, 32), 24, card[3], true),
@@ -1609,6 +1911,7 @@ local function createNationBrainUI()
 	})
 
 	switchTab("Dashboard")
+	startAnimationLoop()
 end
 
 -- Dashboard labels used by the scheduler and status pages.
@@ -1688,6 +1991,7 @@ function updateBrainUI()
 	UI.LastFunds = snap.funds
 	UI.LastInRecovery = snap.inRecovery
 	UI.LastGuardState = snap.guardState
+	UI.LastCascade = snap.cascade
 	if UI.SideCountry then
 		UI.SideCountry.Text = "Nation    " .. tostring(snap.country)
 		UI.SideLeader.Text = "Leader    " .. tostring(snap.leader)

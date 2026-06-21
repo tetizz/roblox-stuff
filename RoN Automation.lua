@@ -2299,7 +2299,7 @@ end
 --============================================================
 -- Nation Brain UI Library
 --============================================================
-local RequiredBrainUIVersion = "2026-06-20.10"
+local RequiredBrainUIVersion = "2026-06-20.11"
 local BrainUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua"
 
 local function makeHeadlessStatus(text)
