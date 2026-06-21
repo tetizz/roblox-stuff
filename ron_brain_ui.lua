@@ -2,7 +2,7 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-20.7"
+BrainUI.Version = "2026-06-20.8"
 BrainUI.UniversalUIVersion = "2026-06-19.6"
 
 local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/universal_ui.lua"
@@ -575,17 +575,18 @@ local function buildBrainSnapshot()
 	end
 	economyScore = clamp(economyScore, 0, 100)
 
-	-- Recovery mode: active when running a net-income deficit. The deeper the
-	-- deficit, the lower the recovery progress (how far back to breakeven).
-	-- DEFICIT_DEEP matches the economy curve's deficit floor (~-20K -> 0).
+	-- Recovery mode: the GAME cancels incoming trades when the BALANCE (money
+	-- on hand) goes negative -- not net income. So the cascade trigger keys on
+	-- funds, not net. (Net still feeds the economy SCORE as a flow/trajectory.)
 	-- When factories are ALSO starved, we're in the import-collapse cascade:
 	-- negative balance -> incoming trades cancel -> factories stop producing.
-	local inRecovery = type(net) == "number" and net < 0
+	local inRecovery = type(funds) == "number" and funds < 0
 	local cascade = inRecovery and starvedCount > 0
 	local recoveryProgress = 0
 	if inRecovery then
-		local DEFICIT_DEEP = 20000
-		recoveryProgress = clamp(100 - (math.abs(net) / DEFICIT_DEEP) * 100, 0, 100)
+		-- Progress back to a zero balance. -50K is a deep hole -> 0%.
+		local BALANCE_DEEP = 50000
+		recoveryProgress = clamp(100 - (math.abs(funds) / BALANCE_DEEP) * 100, 0, 100)
 	end
 
 	local politicsScore = clamp((stability or 70) - ((corruption or 0) * 0.5) + math.min(power / 25, 15), 0, 100)
@@ -638,17 +639,21 @@ local function buildBrainSnapshot()
 	end
 
 	-- Recovery / cascade actions lead the queue.
-	-- Cascade = deficit has canceled incoming trades, starving factories.
-	-- Proven handlers: economy -> resupply+trade, resupply -> scanAndResupplyOnce.
+	-- KEY RULE: while balance < 0 (in debt) you cannot issue BUY requests, so
+	-- resupply (which buys) is useless here. The only debt-legal lever is to
+	-- SELL resources to raise the balance back to >= 0, and stop the spenders
+	-- (Auto Build, wars). Buying/resupply only becomes valid again post-recovery.
+	-- Proven handlers: trade -> attemptOneTrade (sendTrade ...,"Sell").
 	if cascade then
-		-- Imports cancelled: resupply first to restart the starved factories,
-		-- then a trade cycle to rebuild export revenue.
-		push("resupply", "Resupply cancelled imports (" .. tostring(starvedCount) .. " resources)", "High", "00:08", "Medium")
-		push("economy", "Rebuild export revenue", "High", "00:12", "Medium")
+		-- Imports cancelled AND factories starving: sell hard to climb out of
+		-- debt first; resupply is blocked until balance recovers.
+		push("trade", "Sell surplus to exit debt (buying blocked)", "High", "00:08", "Medium")
+		push("economy", "Reduce spending (stop Auto Build / wars)", "Medium", "00:12", "Low")
 	elseif inRecovery then
-		push("economy", "Run recovery cycle (resupply + trade)", "High", "00:10", "Medium")
+		push("trade", "Sell surplus to exit debt", "High", "00:10", "Medium")
 	end
-	if problemResource then
+	-- Resupply buys resources: only useful when NOT in debt (balance >= 0).
+	if problemResource and not inRecovery then
 		push("resupply", "Resupply " .. tostring(problemResource), "High", "00:12", "Low")
 	end
 	if CONFIG.AutoBuildEnabled then
@@ -994,13 +999,16 @@ local function executeBrainAction()
 		attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeValidList, TradeFlowSafetyLabel)
 		safeNotify("Nation Brain", "Trade cycle executed", 3)
 	elseif action.id == "economy" then
-		-- A deficit: resupply fixes resource drains, and a trade cycle
-		-- can raise export revenue. Run both if available.
-		scanAndResupplyOnce()
+		-- Debt-aware: while balance < 0 you cannot BUY, so skip resupply (it
+		-- buys) and only run the SELL cycle to raise the balance back to >= 0.
+		-- Once out of debt, resupply becomes valid again and runs too.
+		if not UI.LastInRecovery then
+			scanAndResupplyOnce()
+		end
 		if attemptOneTrade then
 			attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeValidList, TradeFlowSafetyLabel)
 		end
-		safeNotify("Nation Brain", "Deficit relief cycle executed", 3)
+		safeNotify("Nation Brain", UI.LastInRecovery and "Deficit relief: sold surplus (buying blocked)" or "Deficit relief cycle executed", 3)
 	elseif action.id == "annex" and doAutoAnnex then
 		doAutoAnnex()
 		safeNotify("Nation Brain", "Annex cycle executed", 3)
@@ -1653,6 +1661,8 @@ function updateBrainUI()
 
 	local snap = buildBrainSnapshot()
 	UI.LastAction = snap.nextAction
+	UI.LastFunds = snap.funds
+	UI.LastInRecovery = snap.inRecovery
 	if UI.SideCountry then
 		UI.SideCountry.Text = "Nation    " .. tostring(snap.country)
 		UI.SideLeader.Text = "Leader    " .. tostring(snap.leader)

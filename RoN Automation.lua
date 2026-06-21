@@ -2004,7 +2004,7 @@ end
 --============================================================
 -- Nation Brain UI Library
 --============================================================
-local RequiredBrainUIVersion = "2026-06-20.7"
+local RequiredBrainUIVersion = "2026-06-20.8"
 local BrainUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua"
 
 local function makeHeadlessStatus(text)
@@ -2307,6 +2307,14 @@ task.spawn(function()
 		-- Auto Resupply (fast but not spam/hog; AI-only)
 		if CONFIG.AutoResupplyEnabled then
 			runEvery("auto_resupply", Resupply.IntervalSeconds, function()
+				-- Buying is blocked while in debt (balance < 0); skip the buy
+				-- cycle and report it instead of firing doomed requests.
+				local balance = getMyFunds()
+				if type(balance) == "number" and balance < 0 then
+					AutoResupplyStatusLabel:SetText("Auto Resupply: Paused (in debt)")
+					AutoResupplyDetailsLabel:SetText("Resupply Details: buying blocked until balance >= 0")
+					return
+				end
 				AutoResupplyStatusLabel:SetText("Auto Resupply: Running")
 				local statuses, cityCount = scanAndResupplyOnce()
 				if statuses and #statuses > 0 then
