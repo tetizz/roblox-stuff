@@ -395,9 +395,9 @@ local CitiesCache = {
 	CheckedAt = 0
 }
 
-local CityPresenceCache = {
+local CityCountCache = {
 	Folder = {},
-	HasCities = {},
+	Count = {},
 	CheckedAt = {}
 }
 
@@ -437,30 +437,34 @@ local function getAllMyCitiesSorted(forceRefresh)
 	return list, folder, myCountry
 end
 
-local function countryHasAtLeastOneCity(countryName)
+local function getCountryCityCount(countryName)
 	if type(countryName) ~= "string" or countryName == "" then
-		return false
+		return 0
 	end
 
 	local folder = CitiesRoot:FindFirstChild(countryName)
 	if not folder then
-		CityPresenceCache.Folder[countryName] = nil
-		CityPresenceCache.HasCities[countryName] = nil
-		CityPresenceCache.CheckedAt[countryName] = nil
-		return false
+		CityCountCache.Folder[countryName] = nil
+		CityCountCache.Count[countryName] = nil
+		CityCountCache.CheckedAt[countryName] = nil
+		return 0
 	end
 
 	local t = now()
-	local checkedAt = CityPresenceCache.CheckedAt[countryName]
-	if CityPresenceCache.Folder[countryName] == folder and checkedAt and (t - checkedAt) < 2 then
-		return CityPresenceCache.HasCities[countryName] == true
+	local checkedAt = CityCountCache.CheckedAt[countryName]
+	if CityCountCache.Folder[countryName] == folder and checkedAt and (t - checkedAt) < 1 then
+		return CityCountCache.Count[countryName] or 0
 	end
 
-	local hasCities = #folder:GetChildren() >= 1
-	CityPresenceCache.Folder[countryName] = folder
-	CityPresenceCache.HasCities[countryName] = hasCities
-	CityPresenceCache.CheckedAt[countryName] = t
-	return hasCities
+	local count = #folder:GetChildren()
+	CityCountCache.Folder[countryName] = folder
+	CityCountCache.Count[countryName] = count
+	CityCountCache.CheckedAt[countryName] = t
+	return count
+end
+
+local function countryHasAtLeastOneCity(countryName)
+	return getCountryCityCount(countryName) >= 1
 end
 
 --============================================================
@@ -1301,8 +1305,155 @@ local War = {
 	Declared = {},
 	ProcessedWars = {},
 	ProcessedAnnex = {},
+	ProcessedPeaceDefenders = {},
+	ProcessedAnnexDefenders = {},
+	CityBaseline = {},
 	LastStatus = "Idle"
 }
+
+local OriginalCityCountNames = {
+	"OriginalCityCount",
+	"OriginalCities",
+	"OriginalSize",
+	"InitialCityCount",
+	"InitialCities",
+	"StartingCityCount",
+	"StartingCities",
+	"StartCityCount",
+	"StartCities",
+	"CitiesAtWarStart",
+	"PreWarCityCount",
+	"PreWarCities"
+}
+
+local OriginalCityContainerNames = {
+	"OriginalCityCounts",
+	"OriginalCities",
+	"OriginalSize",
+	"OriginalSizes",
+	"InitialCityCounts",
+	"InitialCities",
+	"StartingCityCounts",
+	"StartingCities",
+	"CityCounts",
+	"CitiesAtWarStart",
+	"PreWarCityCounts",
+	"PreWarCities"
+}
+
+local function readNumericField(container, names)
+	if not container then
+		return
+	end
+
+	for _, name in ipairs(names) do
+		local attr = container:GetAttribute(name)
+		if type(attr) == "number" then
+			return attr
+		end
+
+		local child = container:FindFirstChild(name)
+		local value = getObjectValue(child)
+		if type(value) == "number" then
+			return value
+		end
+	end
+end
+
+local function readNamedNumber(container, names, entryName)
+	if not container or not entryName then
+		return
+	end
+
+	for _, name in ipairs(names) do
+		local child = container:FindFirstChild(name)
+		local entry = child and child:FindFirstChild(entryName)
+		local value = getObjectValue(entry)
+		if type(value) == "number" then
+			return value
+		end
+		local nested = readNumericField(entry, OriginalCityCountNames)
+		if type(nested) == "number" then
+			return nested
+		end
+	end
+end
+
+local function readOriginalCityCount(war, defenderEntry, defenderName)
+	local fromDefender = readNumericField(defenderEntry, OriginalCityCountNames)
+	if type(fromDefender) == "number" then
+		return fromDefender, "defender"
+	end
+
+	local fromWarContainer = readNamedNumber(war, OriginalCityContainerNames, defenderName)
+	if type(fromWarContainer) == "number" then
+		return fromWarContainer, "war"
+	end
+
+	local country = CountryData:FindFirstChild(defenderName)
+	local fromCountry = readNumericField(country, OriginalCityCountNames)
+	if type(fromCountry) == "number" then
+		return fromCountry, "country"
+	end
+end
+
+local function rememberWarCityBaseline(warName, countryName, currentCount)
+	War.CityBaseline[warName] = War.CityBaseline[warName] or {}
+	local existing = War.CityBaseline[warName][countryName]
+	currentCount = tonumber(currentCount) or 0
+	if not existing or currentCount > existing then
+		War.CityBaseline[warName][countryName] = currentCount
+		return currentCount
+	end
+	return existing
+end
+
+local function clearMissingWarState(warsFolder, processed)
+	for warName in pairs(processed) do
+		if not warsFolder:FindFirstChild(warName) then
+			processed[warName] = nil
+			War.ProcessedPeaceDefenders[warName] = nil
+			War.ProcessedAnnexDefenders[warName] = nil
+			War.CityBaseline[warName] = nil
+		end
+	end
+	for warName in pairs(War.CityBaseline) do
+		if not warsFolder:FindFirstChild(warName) then
+			War.ProcessedPeaceDefenders[warName] = nil
+			War.ProcessedAnnexDefenders[warName] = nil
+			War.CityBaseline[warName] = nil
+		end
+	end
+end
+
+local function getPeaceOutCityEligibility(war, defenderEntry, requireRemainingCities)
+	local warName = war.Name
+	local defenderName = defenderEntry.Name
+	local currentCities = getCountryCityCount(defenderName)
+
+	if currentCities <= 0 then
+		if requireRemainingCities then
+			return false, "no cities", currentCities, 0, 0, "none"
+		end
+		return true, "no cities remaining", currentCities, 0, 0, "none"
+	end
+
+	local originalCities, source = readOriginalCityCount(war, defenderEntry, defenderName)
+	if type(originalCities) ~= "number" or originalCities <= 0 then
+		originalCities = rememberWarCityBaseline(warName, defenderName, currentCities)
+		source = "observed"
+	end
+
+	local threshold = math.max(1, math.floor(originalCities * 0.1))
+	if source == "observed" and currentCities >= originalCities then
+		return false, "observing baseline", currentCities, originalCities, threshold, source
+	end
+	if currentCities <= threshold then
+		return true, "eligible", currentCities, originalCities, threshold, source
+	end
+
+	return false, "city threshold", currentCities, originalCities, threshold, source
+end
 
 local function hasConquestCB(myCountryFolder, targetName)
 	local dip = myCountryFolder:FindFirstChild("Diplomacy")
@@ -1446,51 +1597,63 @@ local function doAutoPeace()
 		return
 	end
 
-	-- Clean up missing wars
-	for warName in pairs(War.ProcessedWars) do
-		if not warsFolder:FindFirstChild(warName) then
-			War.ProcessedWars[warName] = nil
-		end
-	end
+	clearMissingWarState(warsFolder, War.ProcessedWars)
 
+	local sent = 0
+	local skipped = 0
 	for _, war in ipairs(warsFolder:GetChildren()) do
 		local warName = war.Name
 		if not War.ProcessedWars[warName] then
 			local attacker = war:FindFirstChild("Attacker")
 			if attacker and attacker:FindFirstChild(myCountry.Name) then
 				local defender = war:FindFirstChild("Defender")
-				local allSent = true
+				local anyPending = false
+				local defenderCount = 0
+				War.ProcessedPeaceDefenders[warName] = War.ProcessedPeaceDefenders[warName] or {}
+				local processedDefenders = War.ProcessedPeaceDefenders[warName]
 				if defender then
 					for _, def in ipairs(defender:GetChildren()) do
 						local defName = def.Name
-						local args = {
-							defName,
-							"PeaceOut",
-							{
-								warName,
-								"Demand",
-								{
-									AnnexSome = {},
-									Money = { Percentage = 75 },
-									Resource = { Percentage = 75 }
+						defenderCount = defenderCount + 1
+						if not processedDefenders[defName] then
+							local eligible, reason, currentCities, originalCities, threshold, source = getPeaceOutCityEligibility(war, def, false)
+							if eligible then
+								local args = {
+									defName,
+									"PeaceOut",
+									{
+										warName,
+										"Demand",
+										{
+											AnnexSome = {},
+											Money = { Percentage = 75 },
+											Resource = { Percentage = 75 }
+										}
+									}
 								}
-							}
-						}
-						if safeFireServer("PeaceOut", ManageAlliance, unpack(args)) then
-							debugPrint("[War]", ("PeaceOut to %s for '%s'"):format(defName, warName))
-						else
-							allSent = false
+								if safeFireServer("PeaceOut", ManageAlliance, unpack(args)) then
+									processedDefenders[defName] = true
+									sent = sent + 1
+									debugPrint("[War]", ("PeaceOut to %s for '%s' (%d/%d <= %d, %s)"):format(defName, warName, currentCities, originalCities, threshold, source))
+								else
+									anyPending = true
+								end
+							else
+								anyPending = true
+								skipped = skipped + 1
+								debugPrint("[War]", ("PeaceOut skipped %s for '%s': %s (%d/%d, threshold %d, %s)"):format(defName, warName, reason, currentCities, originalCities, threshold, source))
+							end
 						end
 					end
 				end
-				if allSent then
+				if defenderCount > 0 and not anyPending then
 					War.ProcessedWars[warName] = true
 				end
 			end
 		end
 	end
 
-	War.LastStatus = "AutoPeace running"
+	War.LastStatus = "AutoPeace sent: " .. tostring(sent) .. " | Waiting: " .. tostring(skipped)
 end
 
 --============================================================
@@ -1511,60 +1674,69 @@ local function doAutoAnnex()
 		return
 	end
 
-	-- Clean up missing wars
-	for warName in pairs(War.ProcessedAnnex) do
-		if not warsFolder:FindFirstChild(warName) then
-			War.ProcessedAnnex[warName] = nil
-		end
-	end
+	clearMissingWarState(warsFolder, War.ProcessedAnnex)
 
 	local extraction = tonumber(CONFIG.AutoAnnexExtractionPercent) or 100
 	if extraction < 0 then extraction = 0 end
 	if extraction > 100 then extraction = 100 end
 
 	local sent = 0
+	local skipped = 0
 	for _, war in ipairs(warsFolder:GetChildren()) do
 		local warName = war.Name
 		if not War.ProcessedAnnex[warName] then
 			local attacker = war:FindFirstChild("Attacker")
 			if attacker and attacker:FindFirstChild(myCountry.Name) then
 				local defender = war:FindFirstChild("Defender")
-				local allSent = true
+				local anyPending = false
+				local defenderCount = 0
+				War.ProcessedAnnexDefenders[warName] = War.ProcessedAnnexDefenders[warName] or {}
+				local processedDefenders = War.ProcessedAnnexDefenders[warName]
 				if defender then
 					for _, def in ipairs(defender:GetChildren()) do
 						local defName = def.Name
-						-- Skip annexing countries that hold no cities (nothing to take).
-						if countryHasAtLeastOneCity(defName) then
-							local args = {
-								defName,
-								"PeaceOut",
-								{
-									warName,
-									"Demand",
+						defenderCount = defenderCount + 1
+						if not processedDefenders[defName] then
+							local eligible, reason, currentCities, originalCities, threshold, source = getPeaceOutCityEligibility(war, def, true)
+							if eligible then
+								local args = {
+									defName,
+									"PeaceOut",
 									{
-										AnnexAll = {},
-										Money = { Percentage = extraction },
-										Resource = { Percentage = extraction }
+										warName,
+										"Demand",
+										{
+											AnnexAll = {},
+											Money = { Percentage = extraction },
+											Resource = { Percentage = extraction }
+										}
 									}
 								}
-							}
-							if safeFireServer("PeaceOut (Annex)", ManageAlliance, unpack(args)) then
-								sent = sent + 1
-								debugPrint("[War]", ("Annex PeaceOut to %s for '%s' (%d%%)"):format(defName, warName, extraction))
+								if safeFireServer("PeaceOut (Annex)", ManageAlliance, unpack(args)) then
+									processedDefenders[defName] = true
+									sent = sent + 1
+									debugPrint("[War]", ("Annex PeaceOut to %s for '%s' (%d%%, %d/%d <= %d, %s)"):format(defName, warName, extraction, currentCities, originalCities, threshold, source))
+								else
+									anyPending = true
+								end
+							elseif reason == "no cities" then
+								processedDefenders[defName] = true
 							else
-								allSent = false
+								anyPending = true
+								skipped = skipped + 1
+								debugPrint("[War]", ("Annex skipped %s for '%s': %s (%d/%d, threshold %d, %s)"):format(defName, warName, reason, currentCities, originalCities, threshold, source))
 							end
 						end
 					end
 				end
-				if allSent then
+				if defenderCount > 0 and not anyPending then
 					War.ProcessedAnnex[warName] = true
 				end
 			end
 		end
 	end
 
-	War.LastStatus = "AutoAnnex sent: " .. tostring(sent)
+	War.LastStatus = "AutoAnnex sent: " .. tostring(sent) .. " | Waiting: " .. tostring(skipped)
 end
 
 --============================================================
