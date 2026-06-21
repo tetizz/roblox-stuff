@@ -134,6 +134,9 @@ local CONFIG = {
 	AutoAnnexEnabled = false, -- annex-all PeaceOut when winning an offensive war
 	AutoAnnexExtractionPercent = 100, -- maps onto proven Money/Resource Percentage (0..100)
 
+	DebtGuardEnabled = false, -- proactive surplus selling as balance falls toward debt
+	DebtGuardFloor = 500000, -- balance below this + negative net = proactive sell
+
 	AutoPromoteEnabled = false, -- corrupt leader promote
 
 	BrainDashboardEnabled = true,
@@ -999,15 +1002,21 @@ local function scanAndResupplyOnce()
 end
 
 --============================================================
--- Debt Recovery (Phase 1): sell a high-surplus resource to exit debt
+-- Debt Guard: proactive + recovery surplus selling
 --
--- When balance < 0, buying is blocked (so resupply is useless). The only
--- debt-legal lever is to SELL. This picks the resource you produce the
--- most SURPLUS of (highest positive Flow = making more than you use) and
--- sells it to an AI buyer, repeating until the balance is back to >= 0.
+-- Sells your highest-surplus resource (highest positive Flow = making more
+-- than you use) to an AI buyer. Two modes:
+--   "proactive" (GUARD): balance is low but not yet negative. Sell GENTLY
+--       (0.25 of Flow) to nudge the balance back up before debt hits.
+--   "recovery" (RECOVER): balance < 0, buying is blocked. Sell HARDER
+--       (0.5 of Flow) to claw back to >= 0.
 --
--- Grounded on: getMyFunds (balance), getCountryResourceFlow (surplus),
--- getValidCandidates (buyers), getUnitSellPrice, sendTrade("Sell").
+-- The orchestrator doDebtGuardOnce() decides which mode (or none) based on
+-- the balance floor + net-income trajectory -- see below.
+--
+-- Grounded on: getMyFunds (balance), getNetIncome (trajectory),
+-- getCountryResourceFlow (surplus), getValidCandidates (buyers),
+-- getUnitSellPrice, sendTrade("Sell"). No new remotes.
 -- Stockpile quantity isn't readable yet, so "has a large stockpile" is
 -- approximated by "strongly positive Flow" (sustained surplus production).
 --============================================================
@@ -1016,22 +1025,17 @@ local DebtRecovery = {
 	LastResource = nil
 }
 
-local function doDebtRecovery()
+-- mode: "proactive" | "recovery"
+local function doDebtGuard(mode)
 	local ok, myCountry = assertStillLeader()
 	if not ok then
 		DebtRecovery.LastStatus = "Not leader"
 		return
 	end
 
-	local balance = getMyFunds()
-	if type(balance) ~= "number" then
-		DebtRecovery.LastStatus = "Balance unknown"
-		return
-	end
-	if balance >= 0 then
-		DebtRecovery.LastStatus = "Not in debt"
-		return
-	end
+	-- Flow cap: gentle when proactive, harder when in actual debt.
+	local flowFraction = mode == "proactive" and 0.25 or 0.5
+	local modeLabel = mode == "proactive" and "Guard" or "Recovery"
 
 	-- Find the resource with the highest positive Flow (most surplus).
 	local resourcesFolder = myCountry:FindFirstChild("Resources")
@@ -1072,18 +1076,49 @@ local function doDebtRecovery()
 	-- Sell to the strongest candidate. Cap units at a fraction of the Flow so
 	-- we don't oversell beyond what we actually produce (keeps Flow healthy).
 	local buyer = candidates[1]
-	local cap = math.floor((bestFlow or 0) * 0.5)
+	local cap = math.floor((bestFlow or 0) * flowFraction)
 	if cap < 1 then cap = 1 end
 	local units = math.min(buyer.units, cap)
 
 	local sent = sendTrade(buyer.name, bestResource, units, "Sell")
 	if sent then
 		DebtRecovery.LastResource = bestResource
-		DebtRecovery.LastStatus = ("Sold %d %s to %s (flow %d)"):format(units, bestResource, buyer.name, math.floor(bestFlow or 0))
-		safeNotify("Debt Recovery", ("Sold %d %s to exit debt"):format(units, bestResource), 4)
+		DebtRecovery.LastStatus = ("[%s] Sold %d %s to %s (flow %d)"):format(modeLabel, units, bestResource, buyer.name, math.floor(bestFlow or 0))
+		safeNotify("Debt " .. modeLabel, ("Sold %d %s"):format(units, bestResource), 4)
 	else
-		DebtRecovery.LastStatus = "Sell failed: " .. bestResource
+		DebtRecovery.LastStatus = "[" .. modeLabel .. "] Sell failed: " .. bestResource
 	end
+end
+
+-- Orchestrator: picks the mode from current state, or does nothing.
+--   balance < 0                      -> recovery (sell harder)
+--   balance < floor AND net < 0      -> proactive (sell gently, heading to debt)
+--   otherwise                        -> healthy (self-healing or fine)
+local function doDebtGuardOnce()
+	local ok, myCountry = assertStillLeader()
+	if not ok then
+		DebtRecovery.LastStatus = "Not leader"
+		return
+	end
+
+	local balance = getMyFunds()
+	if type(balance) ~= "number" then
+		DebtRecovery.LastStatus = "Balance unknown"
+		return
+	end
+
+	if balance < 0 then
+		doDebtGuard("recovery")
+		return
+	end
+
+	local net = getNetIncome(myCountry)
+	if balance < (CONFIG.DebtGuardFloor or 0) and type(net) == "number" and net < 0 then
+		doDebtGuard("proactive")
+		return
+	end
+
+	DebtRecovery.LastStatus = "Healthy"
 end
 
 --============================================================
@@ -2092,7 +2127,7 @@ end
 --============================================================
 -- Nation Brain UI Library
 --============================================================
-local RequiredBrainUIVersion = "2026-06-20.9"
+local RequiredBrainUIVersion = "2026-06-20.10"
 local BrainUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua"
 
 local function makeHeadlessStatus(text)
@@ -2130,6 +2165,7 @@ local function makeHeadlessBrainUI(reason)
 		TradeFlowSafetyLabel = "Flow Safety: ON",
 		WarStatusLabel = "Auto Wars: Idle",
 		PromoteStatusLabel = "Auto Promote: Idle",
+		DebtStatusLabel = "Debt Guard: Idle",
 		AutoResupplyStatusLabel = "Auto Resupply: Idle",
 		AutoResupplyDetailsLabel = "Resupply Details: (none)",
 		UnitTagsStatusLabel = "Unit Tags: Idle",
@@ -2206,7 +2242,7 @@ local function loadBrainUI()
 			doAutoPeace = doAutoPeace,
 			doAutoAnnex = doAutoAnnex,
 			doAutoPromote = doAutoPromote,
-			doDebtRecovery = doDebtRecovery,
+			doDebtGuardOnce = doDebtGuardOnce,
 			safeNotify = safeNotify,
 			buildPolicyInfo = buildPolicyInfo
 		})
@@ -2246,6 +2282,7 @@ local TradeFlowSafetyLabel = BrainUI.Status.TradeFlowSafetyLabel
 
 local WarStatusLabel = BrainUI.Status.WarStatusLabel
 local PromoteStatusLabel = BrainUI.Status.PromoteStatusLabel
+local DebtStatusLabel = BrainUI.Status.DebtStatusLabel
 local AutoResupplyStatusLabel = BrainUI.Status.AutoResupplyStatusLabel
 local AutoResupplyDetailsLabel = BrainUI.Status.AutoResupplyDetailsLabel
 local UnitTagsStatusLabel = BrainUI.Status.UnitTagsStatusLabel
@@ -2415,6 +2452,18 @@ task.spawn(function()
 		else
 			runEvery("auto_resupply_idle", 0.5, function()
 				AutoResupplyStatusLabel:SetText("Auto Resupply: Idle")
+			end)
+		end
+
+		-- Debt Guard (proactive + recovery surplus selling)
+		if CONFIG.DebtGuardEnabled then
+			runEvery("debt_guard", 2.0, function()
+				doDebtGuardOnce()
+				DebtStatusLabel:SetText("Debt Guard: " .. DebtRecovery.LastStatus)
+			end)
+		else
+			runEvery("debt_guard_idle", 0.5, function()
+				DebtStatusLabel:SetText("Debt Guard: Idle")
 			end)
 		end
 

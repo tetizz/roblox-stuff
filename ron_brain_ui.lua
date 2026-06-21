@@ -2,7 +2,7 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-20.9"
+BrainUI.Version = "2026-06-20.10"
 BrainUI.UniversalUIVersion = "2026-06-19.6"
 
 local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/universal_ui.lua"
@@ -53,7 +53,7 @@ function BrainUI.new(ctx)
 	local doAutoPeace = ctx.doAutoPeace
 	local doAutoAnnex = ctx.doAutoAnnex
 	local doAutoPromote = ctx.doAutoPromote
-	local doDebtRecovery = ctx.doDebtRecovery
+	local doDebtGuardOnce = ctx.doDebtGuardOnce
 	local safeNotify = ctx.safeNotify
 	local buildPolicyInfo = ctx.buildPolicyInfo
 
@@ -512,6 +512,7 @@ local function buildBrainSnapshot()
 			threats = 0,
 			confidence = 0,
 			inRecovery = false,
+			guardState = false,
 			cascade = false,
 			recoveryProgress = 0,
 			resourceNeeds = {},
@@ -590,6 +591,13 @@ local function buildBrainSnapshot()
 		recoveryProgress = clamp(100 - (math.abs(funds) / BALANCE_DEEP) * 100, 0, 100)
 	end
 
+	-- GUARD (proactive tier): balance below the floor but not yet in debt, AND
+	-- net income negative (heading toward debt, not self-healing). This is the
+	-- tier where Debt Guard sells surplus gently BEFORE the cascade can start.
+	local guardState = (not inRecovery)
+		and type(funds) == "number" and funds < (CONFIG.DebtGuardFloor or 0)
+		and type(net) == "number" and net < 0
+
 	local politicsScore = clamp((stability or 70) - ((corruption or 0) * 0.5) + math.min(power / 25, 15), 0, 100)
 	local diplomacyScore = clamp(88 - wars * 16 - threats * 24, 0, 100)
 	local militaryScore = clamp(readiness or (wars > 0 and 70 or 82), 0, 100)
@@ -644,7 +652,7 @@ local function buildBrainSnapshot()
 	-- resupply (which buys) is useless here. The only debt-legal lever is to
 	-- SELL resources to raise the balance back to >= 0, and stop the spenders
 	-- (Auto Build, wars). Buying/resupply only becomes valid again post-recovery.
-	-- Proven handler: trade -> doDebtRecovery (sells highest-surplus resource).
+	-- Proven handler: trade -> doDebtGuardOnce (orchestrator sells surplus).
 	if cascade then
 		-- Imports cancelled AND factories starving: sell hard to climb out of
 		-- debt first; resupply is blocked until balance recovers.
@@ -721,6 +729,7 @@ local function buildBrainSnapshot()
 		threats = threats,
 		confidence = confidence,
 		inRecovery = inRecovery,
+		guardState = guardState,
 		cascade = cascade,
 		recoveryProgress = recoveryProgress,
 		resourceNeeds = resourceNeeds,
@@ -996,9 +1005,9 @@ local function executeBrainAction()
 		doAutoPolicy()
 		safeNotify("Nation Brain", "Policy planner cycle executed", 3)
 	elseif action.id == "trade" then
-		if UI.LastInRecovery and doDebtRecovery then
-			-- In debt: sell the highest-surplus resource to claw back to >= 0.
-			doDebtRecovery()
+		if (UI.LastInRecovery or UI.LastGuardState) and doDebtGuardOnce then
+			-- In/near debt: orchestrator picks proactive (guard) vs recovery.
+			doDebtGuardOnce()
 		elseif attemptOneTrade then
 			-- Normal: trade cycle updates the trade status labels itself.
 			attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeValidList, TradeFlowSafetyLabel)
@@ -1271,6 +1280,13 @@ local function renderEconomyPage()
 		y = makeSlider(left, y, "Max Trades Per Scan", Resupply.MaxTradesPerScan, 1, 20, "", function(v)
 			Resupply.MaxTradesPerScan = v
 		end)
+		y = makeToggle(left, y, "Debt Guard (proactive)", CONFIG.DebtGuardEnabled, function(v)
+			CONFIG.DebtGuardEnabled = v
+			DebtStatusLabel:SetText("Debt Guard: " .. (v and "Running" or "Idle"))
+		end)
+		y = makeSlider(left, y, "Debt Guard Floor", CONFIG.DebtGuardFloor, 0, 5000000, "", function(v)
+			CONFIG.DebtGuardFloor = v
+		end)
 
 		local sy = 0
 		sy = bindStatus(right, sy, "Trade", TradeStatusLabel)
@@ -1285,6 +1301,7 @@ local function renderEconomyPage()
 		sy = bindStatus(right, sy, "Safety", TradeFlowSafetyLabel)
 		sy = bindStatus(right, sy, "Resupply", AutoResupplyStatusLabel)
 		sy = bindStatus(right, sy, "Details", AutoResupplyDetailsLabel)
+		sy = bindStatus(right, sy, "Debt Guard", DebtStatusLabel)
 	end)
 end
 
@@ -1622,6 +1639,7 @@ TradeFlowSafetyLabel = wrapStatus("Flow Safety: ON")
 
 WarStatusLabel = wrapStatus("Auto Wars: Idle")
 PromoteStatusLabel = wrapStatus("Auto Promote: Idle")
+DebtStatusLabel = wrapStatus("Debt Guard: Idle")
 AutoResupplyStatusLabel = wrapStatus("Auto Resupply: Idle")
 AutoResupplyDetailsLabel = wrapStatus("Resupply Details: (none)")
 UnitTagsStatusLabel = wrapStatus("Unit Tags: Idle")
@@ -1669,6 +1687,7 @@ function updateBrainUI()
 	UI.LastAction = snap.nextAction
 	UI.LastFunds = snap.funds
 	UI.LastInRecovery = snap.inRecovery
+	UI.LastGuardState = snap.guardState
 	if UI.SideCountry then
 		UI.SideCountry.Text = "Nation    " .. tostring(snap.country)
 		UI.SideLeader.Text = "Leader    " .. tostring(snap.leader)
@@ -1688,6 +1707,11 @@ function updateBrainUI()
 			UI.Brain.State.TextColor3 = C.red
 		elseif snap.inRecovery then
 			UI.Brain.State.Text = "RECOVERY"
+			UI.Brain.State.TextColor3 = C.red
+		elseif snap.guardState then
+			-- Proactive: balance low + losing money, heading toward debt but
+			-- not there yet. Debt Guard sells surplus gently here.
+			UI.Brain.State.Text = "GUARD"
 			UI.Brain.State.TextColor3 = C.amber
 		else
 			UI.Brain.State.Text = snap.online and "ACTIVE" or "WAITING"
@@ -1902,6 +1926,7 @@ end))
 			TradeFlowSafetyLabel = TradeFlowSafetyLabel,
 			WarStatusLabel = WarStatusLabel,
 			PromoteStatusLabel = PromoteStatusLabel,
+			DebtStatusLabel = DebtStatusLabel,
 			AutoResupplyStatusLabel = AutoResupplyStatusLabel,
 			AutoResupplyDetailsLabel = AutoResupplyDetailsLabel,
 			UnitTagsStatusLabel = UnitTagsStatusLabel,

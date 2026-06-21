@@ -2,7 +2,7 @@
 
 Scripts I made.
 
-- `RoN Automation.lua` - optimized Rise of Nations automation hub that loads the custom Nation Brain interface library. Includes Auto Trade, Auto Build, Auto Resupply, Auto Policy, Auto Promote, Auto Annex, Auto Justify/Declare/Peace, and rebel/justification/leader watchers.
+- `RoN Automation.lua` - optimized Rise of Nations automation hub that loads the custom Nation Brain interface library. Includes Auto Trade, Auto Build, Auto Resupply, Auto Policy, Auto Promote, Auto Annex, Auto Justify/Declare/Peace, Debt Guard (proactive surplus selling + debt recovery), and rebel/justification/leader watchers.
 - `ron_brain_ui.lua` - custom RoN Nation Brain GUI library used by the main automation script.
 - `universal_ui.lua` - reusable Roblox UI/runtime toolkit for any game script.
 - `universal_ui_demo.lua` - small standalone demo for the universal UI toolkit.
