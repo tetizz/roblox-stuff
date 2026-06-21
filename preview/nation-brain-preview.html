@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoN Nation Brain Preview</title>
+  <style>
+    :root {
+      --bg: #050d16;
+      --panel: rgba(8, 23, 35, .88);
+      --panel2: rgba(11, 31, 45, .92);
+      --line: rgba(91, 122, 145, .32);
+      --text: #dfe8f2;
+      --muted: #8c9aa9;
+      --green: #77da58;
+      --blue: #3a9dff;
+      --amber: #ffb132;
+      --red: #eb5b4a;
+      --shadow: 0 24px 80px rgba(0, 0, 0, .45);
+      color-scheme: dark;
+      font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 35% 22%, rgba(39, 128, 170, .22), transparent 28%),
+        radial-gradient(circle at 72% 64%, rgba(119, 218, 88, .12), transparent 30%),
+        linear-gradient(140deg, #04080e 0%, #071522 45%, #03070d 100%);
+      color: var(--text);
+    }
+
+    .game {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      min-width: 1200px;
+      min-height: 720px;
+      isolation: isolate;
+    }
+
+    .world {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background:
+        linear-gradient(rgba(22, 36, 47, .26) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(22, 36, 47, .26) 1px, transparent 1px),
+        radial-gradient(circle at 50% 50%, rgba(34, 73, 87, .42), rgba(7, 16, 25, .88) 58%, #03070d 100%);
+      background-size: 80px 80px, 80px 80px, auto;
+    }
+
+    .continent {
+      position: absolute;
+      width: 520px;
+      height: 320px;
+      border-radius: 46% 54% 47% 53% / 58% 37% 63% 42%;
+      background:
+        linear-gradient(145deg, rgba(55, 100, 76, .62), rgba(31, 60, 54, .75)),
+        repeating-linear-gradient(35deg, rgba(255,255,255,.04) 0 2px, transparent 2px 10px);
+      filter: blur(.2px);
+      opacity: .78;
+      box-shadow: inset 0 0 55px rgba(8, 18, 13, .65), 0 0 50px rgba(42, 105, 82, .1);
+      transform: rotate(-12deg);
+    }
+
+    .continent.a { left: 130px; top: 95px; }
+    .continent.b { right: 140px; top: 130px; width: 440px; height: 290px; transform: rotate(16deg); }
+    .continent.c { left: 420px; bottom: 90px; width: 640px; height: 340px; transform: rotate(5deg); opacity: .62; }
+
+    .city {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 14px rgba(119, 218, 88, .95);
+      opacity: .78;
+      animation: cityPulse 2.5s ease-in-out infinite;
+    }
+
+    .city.enemy {
+      background: var(--red);
+      box-shadow: 0 0 16px rgba(235, 91, 74, .95);
+    }
+
+    .city.c1 { left: 240px; top: 170px; }
+    .city.c2 { left: 330px; top: 250px; animation-delay: .4s; }
+    .city.c3 { right: 320px; top: 250px; animation-delay: .8s; }
+    .city.c4 { right: 405px; top: 330px; animation-delay: 1.2s; }
+    .city.c5 { left: 760px; bottom: 230px; animation-delay: 1.5s; }
+
+    .unit {
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(58, 157, 255, .9);
+      border-radius: 4px;
+      background: rgba(58, 157, 255, .15);
+      box-shadow: 0 0 18px rgba(58, 157, 255, .4);
+      animation: unitMove 7s ease-in-out infinite alternate;
+    }
+
+    .unit.enemy {
+      border-color: rgba(235, 91, 74, .9);
+      background: rgba(235, 91, 74, .15);
+      box-shadow: 0 0 18px rgba(235, 91, 74, .4);
+      animation-duration: 6s;
+    }
+
+    .unit.u1 { left: 680px; top: 190px; }
+    .unit.u2 { right: 470px; top: 315px; }
+
+    .topbar {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      height: 38px;
+      z-index: 4;
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      padding: 0 18px;
+      background: rgba(3, 8, 13, .76);
+      border-bottom: 1px solid rgba(120, 150, 170, .18);
+      color: #aebac6;
+      font-size: 13px;
+      backdrop-filter: blur(14px);
+    }
+
+    .topbar strong {
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .state-controls {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+    }
+
+    .state-controls button {
+      border: 1px solid rgba(119, 218, 88, .22);
+      border-radius: 5px;
+      background: rgba(10, 24, 34, .92);
+      color: #aebac6;
+      height: 26px;
+      padding: 0 10px;
+      font: 700 11px/1 "Segoe UI", sans-serif;
+      cursor: pointer;
+      transition: .16s ease;
+    }
+
+    .state-controls button.active,
+    .state-controls button:hover {
+      color: var(--green);
+      border-color: rgba(119, 218, 88, .55);
+      background: rgba(18, 47, 42, .92);
+    }
+
+    .chat {
+      position: absolute;
+      left: 18px;
+      top: 58px;
+      width: 260px;
+      z-index: 2;
+      padding: 14px;
+      border: 1px solid rgba(120, 150, 170, .18);
+      background: rgba(4, 11, 18, .48);
+      backdrop-filter: blur(10px);
+      color: #95a2b0;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .chat div + div {
+      margin-top: 8px;
+    }
+
+    .console {
+      position: absolute;
+      right: 22px;
+      bottom: 22px;
+      width: 380px;
+      z-index: 5;
+      padding: 14px 16px;
+      border: 1px solid rgba(58, 157, 255, .24);
+      background: rgba(3, 10, 17, .76);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+      font: 12px/1.55 Consolas, "Cascadia Mono", monospace;
+      color: #9db3c8;
+    }
+
+    .console b {
+      color: var(--blue);
+      font-weight: 700;
+    }
+
+    .console .ok { color: var(--green); }
+    .console .warn { color: var(--amber); }
+
+    .nation-brain {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      z-index: 10;
+      width: 1260px;
+      height: 700px;
+      display: grid;
+      grid-template-columns: 210px 1fr;
+      overflow: hidden;
+      border: 1px solid rgba(100, 128, 148, .26);
+      background: rgba(6, 16, 25, .92);
+      box-shadow: 0 28px 110px rgba(0, 0, 0, .58);
+      transform: translate(-50%, -48%) scale(.96);
+      backdrop-filter: blur(16px);
+    }
+
+    .sidebar {
+      border-right: 1px solid rgba(110, 140, 160, .18);
+      background: linear-gradient(180deg, rgba(7, 19, 29, .95), rgba(6, 16, 24, .94));
+    }
+
+    .brand {
+      height: 76px;
+      padding: 18px;
+      border-bottom: 1px solid rgba(110, 140, 160, .16);
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 21px;
+      letter-spacing: 0;
+    }
+
+    .brand .online {
+      margin-top: 7px;
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .nav {
+      padding-top: 18px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      height: 54px;
+      padding: 0 18px;
+      border-left: 3px solid transparent;
+      color: #8f9ba8;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .nav-item.active {
+      color: var(--green);
+      border-left-color: var(--green);
+      background: linear-gradient(90deg, rgba(119, 218, 88, .14), transparent);
+    }
+
+    .nav-icon {
+      width: 22px;
+      text-align: center;
+      font-size: 20px;
+    }
+
+    .side-stats {
+      position: absolute;
+      left: 18px;
+      bottom: 18px;
+      width: 170px;
+      font-size: 12px;
+      line-height: 1.85;
+      color: #8f9ba8;
+    }
+
+    .side-stats span {
+      float: right;
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    .main {
+      position: relative;
+      min-width: 0;
+      background:
+        radial-gradient(circle at 42% 38%, rgba(58, 157, 255, .08), transparent 35%),
+        linear-gradient(180deg, rgba(5, 15, 24, .92), rgba(6, 14, 22, .96));
+    }
+
+    .header {
+      height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 16px;
+      padding: 0 20px;
+      border-bottom: 1px solid rgba(110, 140, 160, .18);
+      color: #9aa7b4;
+      font-size: 13px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 14px var(--green);
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: 1fr 365px;
+      grid-template-rows: 475px 1fr;
+      gap: 12px;
+      padding: 10px 12px;
+      height: 642px;
+    }
+
+    .panel {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(109, 137, 157, .22);
+      border-radius: 8px;
+      background:
+        linear-gradient(180deg, rgba(12, 28, 42, .9), rgba(5, 13, 22, .92));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+    }
+
+    .panel-title {
+      position: absolute;
+      left: 18px;
+      top: 14px;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: .02em;
+      color: var(--text);
+      text-transform: uppercase;
+    }
+
+    .brain-model {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .grid-radar {
+      position: absolute;
+      inset: 50px 40px 48px;
+      opacity: .62;
+      background:
+        linear-gradient(rgba(58,157,255,.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(58,157,255,.08) 1px, transparent 1px);
+      background-size: 34px 34px;
+      mask-image: radial-gradient(circle, #000 0 58%, transparent 72%);
+    }
+
+    .brain-core {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 142px;
+      height: 112px;
+      border-radius: 48%;
+      border: 2px solid rgba(58, 157, 255, .72);
+      background:
+        radial-gradient(circle at 45% 35%, rgba(99, 184, 255, .42), transparent 18%),
+        radial-gradient(circle, rgba(16, 76, 133, .7), rgba(5, 25, 45, .88));
+      box-shadow: 0 0 28px rgba(58, 157, 255, .35), inset 0 0 28px rgba(58, 157, 255, .26);
+      transform: translate(-50%, -45%);
+      animation: corePulse 2.6s ease-in-out infinite;
+    }
+
+    .brain-core::before,
+    .brain-core::after {
+      content: "";
+      position: absolute;
+      inset: 10px;
+      border: 1px solid rgba(120, 200, 255, .45);
+      border-radius: 50%;
+      transform: rotate(18deg);
+    }
+
+    .brain-core::after {
+      inset: 24px 18px;
+      transform: rotate(-25deg);
+    }
+
+    .orbit {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 260px;
+      height: 170px;
+      border: 1px solid rgba(58, 157, 255, .14);
+      border-radius: 50%;
+      transform: translate(-50%, -46%) rotate(0deg);
+      animation: orbit 9s linear infinite;
+    }
+
+    .orbit.two {
+      width: 215px;
+      height: 135px;
+      border-color: rgba(119, 218, 88, .18);
+      animation-direction: reverse;
+      animation-duration: 7s;
+    }
+
+    .orbit::before {
+      content: "";
+      position: absolute;
+      right: 20px;
+      top: 18px;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 14px var(--blue);
+    }
+
+    .orbit.two::before {
+      background: var(--green);
+      box-shadow: 0 0 14px var(--green);
+    }
+
+    .node {
+      position: absolute;
+      width: 150px;
+      height: 76px;
+      border: 1px solid rgba(119, 218, 88, .48);
+      border-radius: 8px;
+      background: rgba(11, 28, 35, .9);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 0 20px rgba(119, 218, 88, .08);
+      animation: nodePulse 2.8s ease-in-out infinite;
+    }
+
+    .node .ico {
+      position: absolute;
+      left: 12px;
+      top: 15px;
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      color: var(--green);
+      border: 1px solid rgba(119, 218, 88, .25);
+      font-weight: 900;
+    }
+
+    .node b {
+      position: absolute;
+      left: 58px;
+      top: 10px;
+      font-size: 14px;
+    }
+
+    .node small {
+      position: absolute;
+      left: 58px;
+      top: 33px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .node strong {
+      position: absolute;
+      left: 58px;
+      top: 52px;
+      color: var(--green);
+      font-size: 13px;
+    }
+
+    .n-scanner { left: 364px; top: 58px; }
+    .n-economy { left: 145px; top: 145px; }
+    .n-politics { right: 95px; top: 145px; }
+    .n-diplomacy { left: 85px; top: 265px; }
+    .n-military { right: 55px; top: 265px; }
+    .n-planner { left: 225px; top: 375px; }
+    .n-executor { right: 215px; top: 375px; }
+
+    .flow {
+      position: absolute;
+      height: 2px;
+      background: var(--blue);
+      opacity: .75;
+      box-shadow: 0 0 12px rgba(58, 157, 255, .45);
+      transform-origin: left center;
+      animation: linePulse 2s ease-in-out infinite;
+    }
+
+    .flow::after {
+      content: "";
+      position: absolute;
+      top: -3px;
+      left: 0;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 14px var(--blue);
+      animation: packet 2.8s linear infinite;
+    }
+
+    .f1 { left: 413px; top: 196px; width: 70px; transform: rotate(-90deg); }
+    .f2 { left: 330px; top: 250px; width: 80px; transform: rotate(180deg); }
+    .f3 { left: 476px; top: 250px; width: 95px; }
+    .f4 { left: 365px; top: 305px; width: 90px; transform: rotate(132deg); }
+    .f5 { left: 450px; top: 305px; width: 105px; transform: rotate(40deg); }
+
+    .feedback {
+      position: absolute;
+      border-top: 2px dashed rgba(119, 218, 88, .48);
+      opacity: .72;
+      animation: dash 1.8s linear infinite;
+    }
+
+    .fb1 { left: 280px; top: 112px; width: 110px; transform: rotate(-26deg); }
+    .fb2 { right: 150px; top: 112px; width: 105px; transform: rotate(28deg); }
+    .fb3 { left: 150px; top: 360px; width: 118px; transform: rotate(80deg); }
+    .fb4 { right: 170px; top: 360px; width: 116px; transform: rotate(-58deg); }
+
+    .legend {
+      position: absolute;
+      left: 230px;
+      bottom: 20px;
+      display: flex;
+      gap: 34px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 34px;
+      height: 2px;
+      margin-right: 9px;
+      vertical-align: middle;
+      background: var(--blue);
+      box-shadow: 0 0 8px var(--blue);
+    }
+
+    .legend span:nth-child(2)::before {
+      background: repeating-linear-gradient(90deg, var(--green) 0 5px, transparent 5px 10px);
+      box-shadow: none;
+    }
+
+    .right-panel {
+      grid-column: 2;
+      grid-row: 1;
+      padding: 14px;
+    }
+
+    .select {
+      margin-top: 18px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      border: 1px solid rgba(110, 140, 160, .24);
+      border-radius: 6px;
+      color: var(--green);
+      background: rgba(8, 19, 29, .85);
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .goal {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: 38px 1fr;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .target {
+      width: 36px;
+      height: 36px;
+      border: 2px solid var(--green);
+      border-radius: 50%;
+      box-shadow: 0 0 16px rgba(119, 218, 88, .36);
+      position: relative;
+    }
+
+    .target::before,
+    .target::after {
+      content: "";
+      position: absolute;
+      background: var(--green);
+    }
+
+    .target::before { left: 16px; top: -7px; width: 2px; height: 48px; }
+    .target::after { left: -7px; top: 16px; width: 48px; height: 2px; }
+
+    .goal b {
+      color: var(--green);
+      font-size: 15px;
+    }
+
+    .goal small {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+    }
+
+    .bar {
+      height: 8px;
+      margin-top: 10px;
+      overflow: hidden;
+      border-radius: 10px;
+      background: rgba(120, 145, 165, .22);
+    }
+
+    .bar i {
+      display: block;
+      height: 100%;
+      width: 62%;
+      border-radius: inherit;
+      background: var(--green);
+      box-shadow: 0 0 18px rgba(119, 218, 88, .45);
+      animation: fillBreathe 2.6s ease-in-out infinite;
+    }
+
+    #confBar {
+      width: 87%;
+    }
+
+    .queue {
+      margin-top: 18px;
+    }
+
+    .queue h3,
+    .confidence h3,
+    .panel h3 {
+      margin: 0 0 6px;
+      color: var(--text);
+      font-size: 13px;
+      text-transform: uppercase;
+    }
+
+    .queue-count {
+      float: right;
+      color: var(--muted);
+    }
+
+    .qrow {
+      display: grid;
+      grid-template-columns: 24px 1fr 62px 44px;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 6px;
+      border-radius: 5px;
+      color: #c6d0da;
+      font-size: 11px;
+      background: rgba(20, 38, 53, .36);
+      animation: rowGlow 2.8s ease-in-out infinite;
+    }
+
+    .qrow + .qrow {
+      margin-top: 3px;
+    }
+
+    .prio-high { color: var(--amber); }
+    .prio-med { color: var(--green); }
+    .prio-low { color: var(--blue); }
+
+    .confidence {
+      margin-top: 16px;
+    }
+
+    .score {
+      float: right;
+      margin-top: -34px;
+      color: var(--green);
+      font-size: 26px;
+      font-weight: 800;
+    }
+
+    .next {
+      margin-top: 14px;
+      display: grid;
+      grid-template-columns: 36px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .shield {
+      width: 30px;
+      height: 34px;
+      clip-path: polygon(50% 0, 90% 16%, 82% 70%, 50% 100%, 18% 70%, 10% 16%);
+      background: rgba(58, 157, 255, .2);
+      border: 2px solid var(--blue);
+      box-shadow: 0 0 16px rgba(58, 157, 255, .3);
+    }
+
+    .execute {
+      height: 32px;
+      padding: 0 14px;
+      border: 1px solid rgba(58, 157, 255, .55);
+      border-radius: 6px;
+      background: rgba(20, 63, 105, .55);
+      color: #9bcaff;
+      font-weight: 800;
+      cursor: pointer;
+      transition: .16s ease;
+    }
+
+    .execute:hover {
+      background: rgba(29, 91, 150, .75);
+      transform: translateY(-1px);
+    }
+
+    .next-action {
+      display: block;
+      color: var(--blue);
+      font-size: 16px;
+    }
+
+    .cards {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1.14fr 1fr 1fr;
+      gap: 12px;
+    }
+
+    .metric {
+      padding: 14px;
+      border: 1px solid rgba(109, 137, 157, .22);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(12, 28, 42, .9), rgba(5, 13, 22, .92));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+      animation: cardPulse 3s ease-in-out infinite;
+    }
+
+    .metric h4 {
+      margin: 0 0 8px;
+      color: var(--text);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .metric .value {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--green);
+    }
+
+    .metric .detail {
+      margin-top: 8px;
+      color: var(--green);
+      font-size: 13px;
+    }
+
+    .metric.blue .value,
+    .metric.blue .detail { color: var(--blue); }
+    .metric.amber .value,
+    .metric.amber .detail { color: var(--amber); }
+
+    .spark {
+      height: 22px;
+      margin-top: 8px;
+      background:
+        linear-gradient(135deg, transparent 0 18%, rgba(119, 218, 88, .6) 19% 21%, transparent 22% 38%, rgba(119, 218, 88, .6) 39% 41%, transparent 42% 60%, rgba(119, 218, 88, .6) 61% 63%, transparent 64%);
+      opacity: .7;
+    }
+
+    .resources {
+      display: grid;
+      gap: 5px;
+      font-size: 12px;
+      color: #b7c3cf;
+    }
+
+    .resources span {
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .resources b {
+      color: var(--green);
+    }
+
+    .resources .neg b {
+      color: var(--red);
+    }
+
+    body.guard {
+      --blue: #ffb132;
+    }
+
+    body.recovery,
+    body.cascade {
+      --green: #ffb132;
+      --blue: #eb5b4a;
+    }
+
+    body.cascade .brain-core,
+    body.recovery .brain-core {
+      border-color: var(--red);
+      box-shadow: 0 0 34px rgba(235, 91, 74, .48), inset 0 0 28px rgba(235, 91, 74, .22);
+    }
+
+    @keyframes cityPulse {
+      0%, 100% { transform: scale(.85); opacity: .55; }
+      50% { transform: scale(1.25); opacity: 1; }
+    }
+
+    @keyframes unitMove {
+      0% { transform: translate(0, 0); }
+      100% { transform: translate(42px, -28px); }
+    }
+
+    @keyframes corePulse {
+      0%, 100% { transform: translate(-50%, -45%) scale(.98); }
+      50% { transform: translate(-50%, -45%) scale(1.04); }
+    }
+
+    @keyframes orbit {
+      to { transform: translate(-50%, -46%) rotate(360deg); }
+    }
+
+    @keyframes nodePulse {
+      0%, 100% { border-color: rgba(119, 218, 88, .36); }
+      50% { border-color: rgba(119, 218, 88, .82); box-shadow: 0 0 20px rgba(119, 218, 88, .16); }
+    }
+
+    @keyframes linePulse {
+      0%, 100% { opacity: .32; }
+      50% { opacity: .9; }
+    }
+
+    @keyframes packet {
+      from { left: 0; opacity: 0; }
+      15% { opacity: 1; }
+      85% { opacity: 1; }
+      to { left: 100%; opacity: 0; }
+    }
+
+    @keyframes dash {
+      to { filter: hue-rotate(18deg); }
+    }
+
+    @keyframes fillBreathe {
+      0%, 100% { filter: brightness(.88); }
+      50% { filter: brightness(1.18); }
+    }
+
+    @keyframes rowGlow {
+      0%, 100% { background: rgba(20, 38, 53, .32); }
+      50% { background: rgba(31, 61, 82, .46); }
+    }
+
+    @keyframes cardPulse {
+      0%, 100% { border-color: rgba(109, 137, 157, .22); }
+      50% { border-color: rgba(119, 218, 88, .28); }
+    }
+
+    @media (max-width: 1300px) {
+      .nation-brain {
+        transform: translate(-50%, -48%) scale(.82);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="game">
+    <section class="world" aria-hidden="true">
+      <div class="continent a"></div>
+      <div class="continent b"></div>
+      <div class="continent c"></div>
+      <span class="city c1"></span>
+      <span class="city c2"></span>
+      <span class="city enemy c3"></span>
+      <span class="city enemy c4"></span>
+      <span class="city c5"></span>
+      <span class="unit u1"></span>
+      <span class="unit enemy u2"></span>
+    </section>
+
+    <div class="topbar">
+      <strong>Rise of Nations</strong>
+      <span>World 1</span>
+      <span>Fake Roblox Client Preview</span>
+      <span>Camera: Strategic</span>
+      <div class="state-controls" role="group" aria-label="Preview state controls">
+        <button type="button" class="active" data-mode="active">Active</button>
+        <button type="button" data-mode="guard">Guard</button>
+        <button type="button" data-mode="recovery">Recovery</button>
+        <button type="button" data-mode="cascade">Cascade</button>
+      </div>
+    </div>
+
+    <aside class="chat" aria-label="Mock Roblox chat">
+      <div><b>System:</b> Nation Brain loaded from Lua preview bridge.</div>
+      <div><b>RoN:</b> Defender city threshold: 10% original size.</div>
+      <div><b>Trade:</b> Debt Guard watching balance and flow.</div>
+    </aside>
+
+    <section class="nation-brain" aria-label="RoN Nation Brain fake Roblox environment preview">
+      <aside class="sidebar" aria-label="Nation Brain navigation">
+        <div class="brand">
+          <h1>RoN Nation Brain</h1>
+          <div class="online">● System Online</div>
+        </div>
+        <nav class="nav" aria-label="Nation Brain tabs">
+          <div class="nav-item active"><span class="nav-icon">▦</span>Dashboard</div>
+          <div class="nav-item"><span class="nav-icon">♞</span>Strategy</div>
+          <div class="nav-item"><span class="nav-icon">◉</span>Economy</div>
+          <div class="nav-item"><span class="nav-icon">⌁</span>Build</div>
+          <div class="nav-item"><span class="nav-icon">◆</span>Diplomacy</div>
+          <div class="nav-item"><span class="nav-icon">⚔</span>War</div>
+          <div class="nav-item"><span class="nav-icon">◌</span>Watchers</div>
+          <div class="nav-item"><span class="nav-icon">⚙</span>Settings</div>
+        </nav>
+        <div class="side-stats">
+          <div>Nation <span>RoN</span></div>
+          <div>Leader <span>AI Brain</span></div>
+          <div>Rank <span>#27</span></div>
+          <div>Cities <span>84</span></div>
+          <div>Server <span>World 1</span></div>
+        </div>
+      </aside>
+
+      <section class="main" aria-label="Nation Brain dashboard">
+        <header class="header">
+          <span class="dot"></span>
+          <span>Real Time</span>
+          <span id="clock">14:32:18 UTC</span>
+        </header>
+
+        <div class="content">
+          <section class="panel brain-model" aria-label="Live brain model">
+            <div class="panel-title">Live Brain Model</div>
+            <div class="grid-radar"></div>
+            <div class="flow f1"></div>
+            <div class="flow f2"></div>
+            <div class="flow f3"></div>
+            <div class="flow f4"></div>
+            <div class="flow f5"></div>
+            <div class="feedback fb1"></div>
+            <div class="feedback fb2"></div>
+            <div class="feedback fb3"></div>
+            <div class="feedback fb4"></div>
+            <div class="orbit"></div>
+            <div class="orbit two"></div>
+            <div class="brain-core"></div>
+            <div class="node n-scanner"><span class="ico">SCN</span><b>Scanner</b><small>Live Intel</small><strong>100%</strong></div>
+            <div class="node n-economy"><span class="ico">ECO</span><b>Economy</b><small>Monitoring</small><strong id="eco">98%</strong></div>
+            <div class="node n-politics"><span class="ico">POL</span><b>Politics</b><small>Stability Watch</small><strong>92%</strong></div>
+            <div class="node n-diplomacy"><span class="ico">DIP</span><b>Diplomacy</b><small>Relations Net</small><strong>89%</strong></div>
+            <div class="node n-military"><span class="ico">MIL</span><b>Military</b><small>Force Posture</small><strong>96%</strong></div>
+            <div class="node n-planner"><span class="ico">PLN</span><b>Planner</b><small>Scenario Build</small><strong>94%</strong></div>
+            <div class="node n-executor"><span class="ico">EXE</span><b>Executor</b><small>Action Control</small><strong>93%</strong></div>
+            <div class="legend"><span>Data Flow</span><span>Feedback Loop</span><span>Priority Link</span></div>
+          </section>
+
+          <aside class="panel right-panel" aria-label="Strategy and action queue">
+            <h3>Strategy Mode</h3>
+            <div class="select"><span id="strategy">Economic Power</span><span>⌄</span></div>
+            <div class="goal">
+              <div class="target"></div>
+              <div><b id="goal">Achieve Top 10 Economic Ranking</b><small id="progressText">Progress: 62%</small></div>
+            </div>
+            <div class="bar"><i id="goalBar"></i></div>
+            <div class="queue">
+              <h3>Action Queue <span class="queue-count">5/10</span></h3>
+              <div class="qrow"><span>1</span><span id="q1">Invest in Steel Production</span><span class="prio-high">High</span><span>00:12</span></div>
+              <div class="qrow"><span>2</span><span>Upgrade Trade Center to Lvl 23</span><span class="prio-high">High</span><span>00:18</span></div>
+              <div class="qrow"><span>3</span><span>Expand Gold Mine Network</span><span class="prio-med">Medium</span><span>00:27</span></div>
+              <div class="qrow"><span>4</span><span>Negotiate Trade Agreement</span><span class="prio-med">Medium</span><span>00:45</span></div>
+              <div class="qrow"><span>5</span><span>Run Tax Optimization</span><span class="prio-low">Low</span><span>01:02</span></div>
+            </div>
+            <div class="confidence">
+              <h3>Confidence Score</h3>
+              <div class="score" id="confidence">87%</div>
+              <div class="bar"><i id="confBar"></i></div>
+            </div>
+            <div class="next">
+              <div class="shield"></div>
+              <div><b id="nextAction" class="next-action">Invest in Steel Production</b><span id="risk">ETA: 00:12 | Risk: Low</span></div>
+              <button type="button" class="execute" id="execute">Execute Now</button>
+            </div>
+          </aside>
+
+          <section class="cards" aria-label="Nation metrics">
+            <article class="metric"><h4>Stability</h4><div class="value" id="stability">78%</div><div class="spark"></div><div class="detail">Stable</div></article>
+            <article class="metric"><h4>Money</h4><div class="value" id="money">$ 4.82B</div><div class="spark"></div><div class="detail">Income: $1.24B/h</div></article>
+            <article class="metric blue"><h4>Political Power</h4><div class="value">1,250</div><div class="spark"></div><div class="detail">Rank: #18</div></article>
+            <article class="metric"><h4>Resource Flow</h4><div class="resources">
+              <span>Steel <b>+1.2K</b></span>
+              <span>Aluminum <b>+930</b></span>
+              <span>Oil <b>+410</b></span>
+              <span class="neg">Gold <b>-120</b></span>
+              <span>Uranium <b>+12</b></span>
+            </div></article>
+            <article class="metric"><h4>Readiness</h4><div class="value">92%</div><div class="spark"></div><div class="detail">High</div></article>
+            <article class="metric amber"><h4>War Risk</h4><div class="value" id="warRisk">18%</div><div class="spark"></div><div class="detail">Low</div></article>
+          </section>
+        </div>
+      </section>
+    </section>
+
+    <aside class="console" aria-label="Mock Lua event feed">
+      <div><b>lua.preview()</b> mounted fake PlayerGui environment</div>
+      <div class="ok">✓ RunService.Heartbeat animation loop active</div>
+      <div class="ok">✓ Debt Guard / Auto Annex queue mocked</div>
+      <div class="warn" id="consoleLine">→ Execute Now will simulate next queued action</div>
+    </aside>
+  </main>
+
+  <script>
+    const modes = {
+      active: {
+        strategy: "Economic Power",
+        goal: "Achieve Top 10 Economic Ranking",
+        progress: 62,
+        confidence: 87,
+        eco: "98%",
+        money: "$ 4.82B",
+        risk: "ETA: 00:12 | Risk: Low",
+        next: "Invest in Steel Production",
+        q1: "Invest in Steel Production",
+        console: "→ Execute Now will simulate next queued action"
+      },
+      guard: {
+        strategy: "Economic Guard",
+        goal: "Sell surplus before debt hits",
+        progress: 48,
+        confidence: 74,
+        eco: "61%",
+        money: "$ 412K",
+        risk: "ETA: 00:08 | Risk: Low",
+        next: "Debt Guard: sell surplus steel",
+        q1: "Sell surplus before debt",
+        console: "→ doDebtGuardOnce('proactive') is the next safe action"
+      },
+      recovery: {
+        strategy: "Recovery Mode",
+        goal: "Recover economy from deficit",
+        progress: 35,
+        confidence: 63,
+        eco: "34%",
+        money: "$ -18K",
+        risk: "ETA: 00:10 | Risk: Medium",
+        next: "Sell surplus to exit debt",
+        q1: "Sell surplus to exit debt",
+        console: "→ Buying paused because balance is below zero"
+      },
+      cascade: {
+        strategy: "Cascade Control",
+        goal: "Restart production (imports cancelled)",
+        progress: 19,
+        confidence: 41,
+        eco: "22%",
+        money: "$ -52K",
+        risk: "ETA: 00:08 | Risk: Medium",
+        next: "Emergency surplus sell",
+        q1: "Emergency surplus sell",
+        console: "→ Imports cancelled; factories starved; resupply blocked"
+      }
+    };
+
+    function setMode(mode) {
+      const data = modes[mode] || modes.active;
+      document.body.className = mode === "active" ? "" : mode;
+      document.querySelectorAll(".state-controls button").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.mode === mode);
+      });
+      document.getElementById("strategy").textContent = data.strategy;
+      document.getElementById("goal").textContent = data.goal;
+      document.getElementById("progressText").textContent = `Progress: ${data.progress}%`;
+      document.getElementById("goalBar").style.width = `${data.progress}%`;
+      document.getElementById("confidence").textContent = `${data.confidence}%`;
+      document.getElementById("confBar").style.width = `${data.confidence}%`;
+      document.getElementById("eco").textContent = data.eco;
+      document.getElementById("money").textContent = data.money;
+      document.getElementById("risk").textContent = data.risk;
+      document.getElementById("nextAction").textContent = data.next;
+      document.getElementById("q1").textContent = data.q1;
+      document.getElementById("consoleLine").textContent = data.console;
+    }
+
+    document.querySelectorAll(".state-controls button").forEach((btn) => {
+      btn.addEventListener("click", () => setMode(btn.dataset.mode));
+    });
+
+    document.getElementById("execute").addEventListener("click", () => {
+      const line = document.getElementById("consoleLine");
+      line.textContent = "✓ Mock remote action fired; UI state updated locally";
+      setTimeout(() => setMode(document.body.className || "active"), 1300);
+    });
+
+    function tickClock() {
+      const now = new Date();
+      document.getElementById("clock").textContent = now.toISOString().slice(11, 19) + " UTC";
+    }
+
+    tickClock();
+    setInterval(tickClock, 1000);
+  </script>
+</body>
+</html>
