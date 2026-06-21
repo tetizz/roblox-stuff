@@ -2,7 +2,7 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-20.11"
+BrainUI.Version = "2026-06-20.12"
 BrainUI.UniversalUIVersion = "2026-06-19.6"
 
 local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/universal_ui.lua"
@@ -491,6 +491,14 @@ local function animateDashboard(dt)
 				item.Stroke.Transparency = 0.12 + 0.32 * (1 - alpha)
 			end
 		end
+	end
+
+	-- Tint the brain image to the danger/guard/healthy accent and pulse it,
+	-- matching the surrounding node animation.
+	if UI.Brain and UI.Brain.Image and UI.Brain.Image.Parent then
+		local alpha = (math.sin(t * 1.2) + 1) * 0.5
+		UI.Brain.Image.ImageColor3 = accent
+		UI.Brain.Image.ImageTransparency = 0.05 + 0.12 * (1 - alpha)
 	end
 
 	for _, item in ipairs(anim.QueueRows or {}) do
@@ -1350,8 +1358,27 @@ local function renderDashboardPage()
 	})
 	corner(center, 52)
 	stroke(center, C.blue, 0.1, 2)
-	makeText(center, "BRAIN", UDim2.fromOffset(0, 39), UDim2.fromOffset(140, 26), 20, C.blue, true).TextXAlignment = Enum.TextXAlignment.Center
+	-- If a real brain image asset is configured, render it on top of the orb.
+	-- Until one is provided this stays a no-op and the classic orb shows.
+	local brainImage = nil
+	if type(CONFIG.BrainImageId) == "string" and CONFIG.BrainImageId ~= "" then
+		brainImage = inst("ImageLabel", {
+			BackgroundTransparency = 1,
+			Image = CONFIG.BrainImageId,
+			ImageColor3 = C.blue,
+			ImageTransparency = 0.05,
+			ScaleType = Enum.ScaleType.Fit,
+			Size = UDim2.fromScale(1, 1),
+			Parent = center
+		})
+		-- Hide the "BRAIN" text label when an image is showing.
+		makeText(center, "", UDim2.fromOffset(0, 39), UDim2.fromOffset(140, 26), 20, C.blue, true).TextXAlignment = Enum.TextXAlignment.Center
+	else
+		makeText(center, "BRAIN", UDim2.fromOffset(0, 39), UDim2.fromOffset(140, 26), 20, C.blue, true).TextXAlignment = Enum.TextXAlignment.Center
+	end
 	registerNode(center, center:FindFirstChildOfClass("UIStroke"), 0)
+	UI.Brain.Center = center
+	UI.Brain.Image = brainImage
 	registerOrbit(model, 340, 250, 112, 72, C.blue, 0.9, 0)
 	registerOrbit(model, 340, 250, 95, 58, C.green, -0.7, 1.8)
 

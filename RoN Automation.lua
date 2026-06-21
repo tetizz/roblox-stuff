@@ -140,6 +140,7 @@ local CONFIG = {
 	AutoPromoteEnabled = false, -- corrupt leader promote
 
 	BrainDashboardEnabled = true,
+	BrainImageId = nil, -- set to a rbxassetid://... to replace the brain orb with a real brain image
 	BrainStrategyMode = "Economic Power",
 
 	NotificationsEnabled = true
@@ -2299,7 +2300,7 @@ end
 --============================================================
 -- Nation Brain UI Library
 --============================================================
-local RequiredBrainUIVersion = "2026-06-20.11"
+local RequiredBrainUIVersion = "2026-06-20.12"
 local BrainUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua"
 
 local function makeHeadlessStatus(text)
