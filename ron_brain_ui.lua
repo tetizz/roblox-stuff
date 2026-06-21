@@ -2,7 +2,7 @@
 -- Pull from: https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua
 
 local BrainUI = {}
-BrainUI.Version = "2026-06-20.8"
+BrainUI.Version = "2026-06-20.9"
 BrainUI.UniversalUIVersion = "2026-06-19.6"
 
 local UniversalUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/universal_ui.lua"
@@ -53,6 +53,7 @@ function BrainUI.new(ctx)
 	local doAutoPeace = ctx.doAutoPeace
 	local doAutoAnnex = ctx.doAutoAnnex
 	local doAutoPromote = ctx.doAutoPromote
+	local doDebtRecovery = ctx.doDebtRecovery
 	local safeNotify = ctx.safeNotify
 	local buildPolicyInfo = ctx.buildPolicyInfo
 
@@ -643,7 +644,7 @@ local function buildBrainSnapshot()
 	-- resupply (which buys) is useless here. The only debt-legal lever is to
 	-- SELL resources to raise the balance back to >= 0, and stop the spenders
 	-- (Auto Build, wars). Buying/resupply only becomes valid again post-recovery.
-	-- Proven handlers: trade -> attemptOneTrade (sendTrade ...,"Sell").
+	-- Proven handler: trade -> doDebtRecovery (sells highest-surplus resource).
 	if cascade then
 		-- Imports cancelled AND factories starving: sell hard to climb out of
 		-- debt first; resupply is blocked until balance recovers.
@@ -994,10 +995,15 @@ local function executeBrainAction()
 	elseif action.id == "policy" then
 		doAutoPolicy()
 		safeNotify("Nation Brain", "Policy planner cycle executed", 3)
-	elseif action.id == "trade" and attemptOneTrade then
-		-- attemptOneTrade updates the trade status labels itself.
-		attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeValidList, TradeFlowSafetyLabel)
-		safeNotify("Nation Brain", "Trade cycle executed", 3)
+	elseif action.id == "trade" then
+		if UI.LastInRecovery and doDebtRecovery then
+			-- In debt: sell the highest-surplus resource to claw back to >= 0.
+			doDebtRecovery()
+		elseif attemptOneTrade then
+			-- Normal: trade cycle updates the trade status labels itself.
+			attemptOneTrade(TradeStatusLabel, TradeAttemptingLabel, setTradeValidList, TradeFlowSafetyLabel)
+			safeNotify("Nation Brain", "Trade cycle executed", 3)
+		end
 	elseif action.id == "economy" then
 		-- Debt-aware: while balance < 0 you cannot BUY, so skip resupply (it
 		-- buys) and only run the SELL cycle to raise the balance back to >= 0.

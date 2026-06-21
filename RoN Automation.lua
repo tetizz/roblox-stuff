@@ -999,6 +999,94 @@ local function scanAndResupplyOnce()
 end
 
 --============================================================
+-- Debt Recovery (Phase 1): sell a high-surplus resource to exit debt
+--
+-- When balance < 0, buying is blocked (so resupply is useless). The only
+-- debt-legal lever is to SELL. This picks the resource you produce the
+-- most SURPLUS of (highest positive Flow = making more than you use) and
+-- sells it to an AI buyer, repeating until the balance is back to >= 0.
+--
+-- Grounded on: getMyFunds (balance), getCountryResourceFlow (surplus),
+-- getValidCandidates (buyers), getUnitSellPrice, sendTrade("Sell").
+-- Stockpile quantity isn't readable yet, so "has a large stockpile" is
+-- approximated by "strongly positive Flow" (sustained surplus production).
+--============================================================
+local DebtRecovery = {
+	LastStatus = "Idle",
+	LastResource = nil
+}
+
+local function doDebtRecovery()
+	local ok, myCountry = assertStillLeader()
+	if not ok then
+		DebtRecovery.LastStatus = "Not leader"
+		return
+	end
+
+	local balance = getMyFunds()
+	if type(balance) ~= "number" then
+		DebtRecovery.LastStatus = "Balance unknown"
+		return
+	end
+	if balance >= 0 then
+		DebtRecovery.LastStatus = "Not in debt"
+		return
+	end
+
+	-- Find the resource with the highest positive Flow (most surplus).
+	local resourcesFolder = myCountry:FindFirstChild("Resources")
+	if not resourcesFolder then
+		DebtRecovery.LastStatus = "No resources folder"
+		return
+	end
+
+	local bestResource, bestFlow
+	for _, res in ipairs(resourcesFolder:GetChildren()) do
+		local flow = getCountryResourceFlow(myCountry, res.Name)
+		if type(flow) == "number" and flow > 0 then
+			if not bestFlow or flow > bestFlow then
+				bestFlow = flow
+				bestResource = res.Name
+			end
+		end
+	end
+
+	if not bestResource then
+		DebtRecovery.LastStatus = "No surplus resource to sell"
+		return
+	end
+
+	local price = getUnitSellPrice(bestResource)
+	if not price or price <= 0 then
+		DebtRecovery.LastStatus = "No price for " .. bestResource
+		return
+	end
+
+	-- Find a buyer for this resource.
+	local candidates = getValidCandidates(myCountry, bestResource, price)
+	if #candidates == 0 then
+		DebtRecovery.LastStatus = "No buyer for " .. bestResource
+		return
+	end
+
+	-- Sell to the strongest candidate. Cap units at a fraction of the Flow so
+	-- we don't oversell beyond what we actually produce (keeps Flow healthy).
+	local buyer = candidates[1]
+	local cap = math.floor((bestFlow or 0) * 0.5)
+	if cap < 1 then cap = 1 end
+	local units = math.min(buyer.units, cap)
+
+	local sent = sendTrade(buyer.name, bestResource, units, "Sell")
+	if sent then
+		DebtRecovery.LastResource = bestResource
+		DebtRecovery.LastStatus = ("Sold %d %s to %s (flow %d)"):format(units, bestResource, buyer.name, math.floor(bestFlow or 0))
+		safeNotify("Debt Recovery", ("Sold %d %s to exit debt"):format(units, bestResource), 4)
+	else
+		DebtRecovery.LastStatus = "Sell failed: " .. bestResource
+	end
+end
+
+--============================================================
 -- Unit Tags (auto force enabled while toggle)
 --============================================================
 local function ForceTags()
@@ -2004,7 +2092,7 @@ end
 --============================================================
 -- Nation Brain UI Library
 --============================================================
-local RequiredBrainUIVersion = "2026-06-20.8"
+local RequiredBrainUIVersion = "2026-06-20.9"
 local BrainUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua"
 
 local function makeHeadlessStatus(text)
@@ -2118,6 +2206,7 @@ local function loadBrainUI()
 			doAutoPeace = doAutoPeace,
 			doAutoAnnex = doAutoAnnex,
 			doAutoPromote = doAutoPromote,
+			doDebtRecovery = doDebtRecovery,
 			safeNotify = safeNotify,
 			buildPolicyInfo = buildPolicyInfo
 		})
