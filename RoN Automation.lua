@@ -25,6 +25,7 @@ local Runtime = {
 	Alive = true,
 	Connections = {}
 }
+local RestoreTags
 
 local function disconnectRuntimeConnections()
 	for _, conn in ipairs(Runtime.Connections) do
@@ -46,6 +47,9 @@ if _G then
 	_G[RuntimeCleanupKey] = function()
 		Runtime.Alive = false
 		disconnectRuntimeConnections()
+		if type(RestoreTags) == "function" then
+			pcall(RestoreTags)
+		end
 		if type(_G.RoNNationBrainCleanup) == "function" then
 			pcall(_G.RoNNationBrainCleanup)
 		end
@@ -140,7 +144,6 @@ local CONFIG = {
 	AutoPromoteEnabled = false, -- corrupt leader promote
 
 	BrainDashboardEnabled = true,
-	BrainImageId = nil, -- set to a rbxassetid://... to replace the brain orb with a real brain image
 	BrainStrategyMode = "Economic Power",
 
 	NotificationsEnabled = true
@@ -156,9 +159,17 @@ local function debugPrint(tag, ...)
 	end
 end
 
+local CustomNotify
+
 local function safeNotify(title, text, duration)
 	if not CONFIG.NotificationsEnabled then
 		return
+	end
+	if type(CustomNotify) == "function" then
+		local ok, handled = pcall(CustomNotify, title, text, duration)
+		if ok and handled ~= false then
+			return
+		end
 	end
 	pcall(function()
 		StarterGui:SetCore("SendNotification", {
@@ -531,18 +542,22 @@ local function getCountryResourceFlow(country, resource)
 end
 
 local function isTradeAllowedByFlow(myCountry, resource, units)
+	if type(units) ~= "number" or units ~= units or units <= 0 or units == math.huge then
+		return false, "units invalid"
+	end
 	if CONFIG.TradeBypassFlowSafety then
 		return true, nil
 	end
 
 	local flow = getCountryResourceFlow(myCountry, resource)
-	if type(flow) == "number" then
-		if flow < 0 then
-			return false, "flow negative"
-		end
-		if type(units) == "number" and units > flow then
-			return false, "units exceed flow"
-		end
+	if type(flow) ~= "number" or flow ~= flow or flow == math.huge or flow == -math.huge then
+		return false, "flow unavailable"
+	end
+	if flow < 0 then
+		return false, "flow negative"
+	end
+	if units > flow then
+		return false, "units exceed flow"
 	end
 
 	return true, nil
@@ -552,8 +567,11 @@ local function getUnitSellPrice(resource)
 	local v = Resources:FindFirstChild(resource)
 	if not v then return end
 	local value = getObjectValue(v)
-	if type(value) == "number" then
-		return value * 0.8
+	if type(value) == "number" and value == value and value > 0 and value < math.huge then
+		local sellPrice = value * 0.8
+		if sellPrice > 0 and sellPrice < math.huge then
+			return sellPrice
+		end
 	end
 end
 
@@ -607,9 +625,17 @@ local function computeUnitsFromNet(netIncome, unitSellPrice)
 	if type(netIncome) ~= "number" or netIncome <= 0 then
 		return 0
 	end
+	if type(unitSellPrice) ~= "number" or unitSellPrice <= 0 then
+		return 0
+	end
+
+	local multiplier = tonumber(CONFIG.TradeMultiplier) or 1
+	if multiplier <= 0 then
+		return 0
+	end
 
 	local targetMoney = netIncome * CONFIG.TradeTargetPercent
-	local units = targetMoney / (unitSellPrice * CONFIG.TradeMultiplier)
+	local units = targetMoney / (unitSellPrice * multiplier)
 
 	if units < CONFIG.TradeMinUnits then
 		return 0
@@ -750,6 +776,7 @@ end
 local Resupply = {
 	-- Per supplier/resource retry cooldowns
 	Paused = {}, -- key = supplier|resource -> time
+	Pending = {}, -- key = supplier|resource -> expected replication
 	CheckDelay = 1.25,
 	CooldownSeconds = 30,
 	IntervalSeconds = 0.5,
@@ -763,7 +790,12 @@ end
 local function isResupplySupplierOnCooldown(supplier, resource)
 	local k = resKey(supplier, resource)
 	local t = Resupply.Paused[k]
-	return t and t > now()
+	local pendingUntil = Resupply.Pending[k]
+	if pendingUntil and pendingUntil <= now() then
+		Resupply.Pending[k] = nil
+		pendingUntil = nil
+	end
+	return (t and t > now()) or pendingUntil ~= nil
 end
 
 local function setResupplySupplierCooldown(supplier, resource)
@@ -851,6 +883,12 @@ local function hasTradePartner(myCountry, resourceName, partner)
 	return trade:FindFirstChild(partner) ~= nil
 end
 
+local function getPartnerTradeX(myCountry, resourceName, partner)
+	local trade = getTradeFolderForMyResource(myCountry, resourceName)
+	local entry = trade and trade:FindFirstChild(partner)
+	return entry and getTradeXFromEntry(entry) or 0
+end
+
 local function buildAISuppliers(myCountry, resourceName, playerSet)
 	-- AI-only suppliers with Flow > 0 for resource, excluding us.
 	-- Prefer existing trade partners first; then higher flow.
@@ -889,38 +927,45 @@ local function sendBuy(targetCountry, resourceName, amount)
 	return safeFireServer("Buy", ManageAlliance, targetCountry, "ResourceTrade", { resourceName, "Buy", amount, 1, "Trade" })
 end
 
-local function attemptResupplyResource(myCountry, resourceName, delta, playerSet, statusOut)
+local function attemptResupplyResource(myCountry, resourceName, delta, playerSet, statusOut, maxTrades)
 	local remaining = delta
 	local suppliers = buildAISuppliers(myCountry, resourceName, playerSet)
 	local tradesSent = 0
+	local tradeLimit = math.max(0, tonumber(maxTrades) or Resupply.MaxTradesPerScan)
 
 	for i = 1, #suppliers do
 		if remaining <= 0 then break end
-		if tradesSent >= Resupply.MaxTradesPerScan then break end
+		if tradesSent >= tradeLimit then break end
 
 		local s = suppliers[i]
 		if not s.onCd then
 			local amt = math.min(remaining, s.flow)
 			if amt > 0 then
 				local supplierName = s.name
+				local pendingKey = resKey(supplierName, resourceName)
+				local previousAmount = getPartnerTradeX(myCountry, resourceName, supplierName)
+				Resupply.Pending[pendingKey] = now() + math.max(2, Resupply.CheckDelay + 0.5)
 				local sent, sendErr = sendBuy(supplierName, resourceName, amt)
 				tradesSent = tradesSent + 1
 				if sent then
-					-- After a delay, if trade entry is not present, pause that supplier/resource briefly.
+					-- Confirm the replicated amount changed before allowing another request.
 					task.delay(Resupply.CheckDelay, function()
 						if not Runtime.Alive then
 							return
 						end
 
+						Resupply.Pending[pendingKey] = nil
 						local ok2, myCountry2 = assertStillLeader()
 						if not ok2 then return end
-						if not hasTradePartner(myCountry2, resourceName, supplierName) then
+						local currentAmount = getPartnerTradeX(myCountry2, resourceName, supplierName)
+						if currentAmount <= previousAmount then
 							setResupplySupplierCooldown(supplierName, resourceName)
 						end
 					end)
 
 					remaining = remaining - amt
 				else
+					Resupply.Pending[pendingKey] = nil
 					setResupplySupplierCooldown(supplierName, resourceName)
 					if statusOut then
 						statusOut[#statusOut + 1] = resourceName .. " failed=" .. supplierName .. " err=" .. tostring(sendErr)
@@ -934,7 +979,7 @@ local function attemptResupplyResource(myCountry, resourceName, delta, playerSet
 		statusOut[#statusOut + 1] = resourceName .. " delta=" .. tostring(delta) .. " sent=" .. tostring(delta - remaining) .. " trades=" .. tostring(tradesSent)
 	end
 
-	return delta - remaining
+	return delta - remaining, tradesSent
 end
 
 local function computeTotalNeedByResource(cities)
@@ -973,14 +1018,28 @@ local function scanAndResupplyOnce()
 
 	local playerSet = buildPlayerIdentitySet()
 	local needByRes = computeTotalNeedByResource(citiesList)
+	local prioritizedNeeds = {}
+	for resName, needTotal in pairs(needByRes) do
+		prioritizedNeeds[#prioritizedNeeds + 1] = {
+			name = resName,
+			need = tonumber(needTotal) or 0
+		}
+	end
+	table.sort(prioritizedNeeds, function(a, b)
+		if a.need == b.need then
+			return a.name < b.name
+		end
+		return a.need > b.need
+	end)
 
 	local totalTradesBudget = Resupply.MaxTradesPerScan
-	for resName, needTotal in pairs(needByRes) do
+	for _, resourceNeed in ipairs(prioritizedNeeds) do
 		if totalTradesBudget <= 0 then
 			break
 		end
 
-		needTotal = tonumber(needTotal) or 0
+		local resName = resourceNeed.name
+		local needTotal = resourceNeed.need
 		if needTotal > 0 then
 			local flow = getCountryResourceFlow(myCountry, resName)
 			if CONFIG.AutoResupplyOnlyNegativeFlow and (type(flow) ~= "number" or flow >= 0) then
@@ -990,10 +1049,8 @@ local function scanAndResupplyOnce()
 				local delta = needTotal - currentTotalX
 
 				if delta > 0 then
-					local before = #statuses
-					local bought = attemptResupplyResource(myCountry, resName, delta, playerSet, statuses)
-					local usedTrades = #statuses - before
-					totalTradesBudget = totalTradesBudget - usedTrades
+					local bought, tradesSent = attemptResupplyResource(myCountry, resName, delta, playerSet, statuses, totalTradesBudget)
+					totalTradesBudget = math.max(0, totalTradesBudget - (tradesSent or 0))
 
 					if bought > 0 then
 						debugPrint("[Resupply]", "Need", resName, "need=", needTotal, "tradingX=", currentTotalX, "delta=", delta, "bought=", bought)
@@ -1029,6 +1086,7 @@ local DebtRecovery = {
 	LastStatus = "Idle",
 	LastResource = nil
 }
+local getValidCandidates
 
 -- mode: "proactive" | "recovery"
 local function doDebtGuard(mode)
@@ -1129,12 +1187,26 @@ end
 --============================================================
 -- Unit Tags (auto force enabled while toggle)
 --============================================================
+local UnitTagPrevious = setmetatable({}, { __mode = "k" })
+
 local function ForceTags()
 	for _, v in next, GetChildren(Units) do
 		local Tag = FirstChild(v, "Tag")
 		if Tag then
+			if UnitTagPrevious[Tag] == nil then
+				UnitTagPrevious[Tag] = Tag.Enabled
+			end
 			Tag.Enabled = true
 		end
+	end
+end
+
+RestoreTags = function()
+	for tag, wasEnabled in pairs(UnitTagPrevious) do
+		if tag and tag.Parent then
+			tag.Enabled = wasEnabled
+		end
+		UnitTagPrevious[tag] = nil
 	end
 end
 
@@ -1546,10 +1618,12 @@ local function doAutoJustify()
 				skipped = skipped + 1
 			elseif (not War.Justified[name]) or War.Justified[name] <= t then
 				local sent = safeFireServer("JustifyWar", JustifyWar, name, "Conquest")
-				War.Justified[name] = t + CONFIG.AutoJustifyRetrySeconds
 				if sent then
+					War.Justified[name] = t + CONFIG.AutoJustifyRetrySeconds
 					attempted = attempted + 1
 					debugPrint("[War]", "Justified on", name)
+				else
+					War.Justified[name] = nil
 				end
 			end
 		else
@@ -1569,13 +1643,20 @@ local function doAutoDeclare()
 	end
 
 	local playerSet = buildPlayerIdentitySet()
+	local t = now()
+	for targetName, retryAt in pairs(War.Declared) do
+		if type(retryAt) ~= "number" or retryAt <= t then
+			War.Declared[targetName] = nil
+		end
+	end
 
 	for _, c in ipairs(CountryData:GetChildren()) do
 		local name = c.Name
-		if isWarTargetAllowed(myCountry, c, playerSet) then
+		local isAI = isCountryAI(c, playerSet)
+		if isAI and not isCountryInWar(name) and isWarTargetAllowed(myCountry, c, playerSet) then
 			if not War.Declared[name] and hasConquestCB(myCountry, name) then
 				if safeFireServer("WarDeclare", ManageAlliance, name, "WarDeclare", "Conquest") then
-					War.Declared[name] = true
+					War.Declared[name] = t + math.max(10, tonumber(CONFIG.AutoJustifyRetrySeconds) or 60)
 					debugPrint("[War]", "Declared on", name)
 				end
 			end
@@ -1602,6 +1683,7 @@ local function doAutoPeace()
 
 	local sent = 0
 	local skipped = 0
+	local currentTime = now()
 	for _, war in ipairs(warsFolder:GetChildren()) do
 		local warName = war.Name
 		if not War.ProcessedWars[warName] then
@@ -1616,7 +1698,11 @@ local function doAutoPeace()
 					for _, def in ipairs(defender:GetChildren()) do
 						local defName = def.Name
 						defenderCount = defenderCount + 1
-						if not processedDefenders[defName] then
+						local retryAt = processedDefenders[defName]
+						if type(retryAt) == "number" and retryAt > currentTime then
+							anyPending = true
+						else
+							processedDefenders[defName] = nil
 							local eligible, reason, currentCities, originalCities, threshold, source = getPeaceOutCityEligibility(war, def, false)
 							if eligible then
 								local args = {
@@ -1633,9 +1719,10 @@ local function doAutoPeace()
 									}
 								}
 								if safeFireServer("PeaceOut", ManageAlliance, unpack(args)) then
-									processedDefenders[defName] = true
+									processedDefenders[defName] = currentTime + 10
+									anyPending = true
 									sent = sent + 1
-									debugPrint("[War]", ("PeaceOut to %s for '%s' (%d/%d <= %d, %s)"):format(defName, warName, currentCities, originalCities, threshold, source))
+									debugPrint("[War]", ("PeaceOut requested for %s in '%s' (%d/%d <= %d, %s)"):format(defName, warName, currentCities, originalCities, threshold, source))
 								else
 									anyPending = true
 								end
@@ -1683,6 +1770,7 @@ local function doAutoAnnex()
 
 	local sent = 0
 	local skipped = 0
+	local currentTime = now()
 	for _, war in ipairs(warsFolder:GetChildren()) do
 		local warName = war.Name
 		if not War.ProcessedAnnex[warName] then
@@ -1697,7 +1785,11 @@ local function doAutoAnnex()
 					for _, def in ipairs(defender:GetChildren()) do
 						local defName = def.Name
 						defenderCount = defenderCount + 1
-						if not processedDefenders[defName] then
+						local retryAt = processedDefenders[defName]
+						if type(retryAt) == "number" and retryAt > currentTime then
+							anyPending = true
+						else
+							processedDefenders[defName] = nil
 							local eligible, reason, currentCities, originalCities, threshold, source = getPeaceOutCityEligibility(war, def, true)
 							if eligible then
 								local args = {
@@ -1714,14 +1806,13 @@ local function doAutoAnnex()
 									}
 								}
 								if safeFireServer("PeaceOut (Annex)", ManageAlliance, unpack(args)) then
-									processedDefenders[defName] = true
+									processedDefenders[defName] = currentTime + 10
+									anyPending = true
 									sent = sent + 1
-									debugPrint("[War]", ("Annex PeaceOut to %s for '%s' (%d%%, %d/%d <= %d, %s)"):format(defName, warName, extraction, currentCities, originalCities, threshold, source))
+									debugPrint("[War]", ("Annex PeaceOut requested for %s in '%s' (%d%%, %d/%d <= %d, %s)"):format(defName, warName, extraction, currentCities, originalCities, threshold, source))
 								else
 									anyPending = true
 								end
-							elseif reason == "no cities" then
-								processedDefenders[defName] = true
 							else
 								anyPending = true
 								skipped = skipped + 1
@@ -1982,6 +2073,7 @@ local function doAutoPolicy()
 				if safeFireServer("Policy", ChangeLaw, "Policy", policy.name) then
 					Policy.RecentlyEnacted[policy.name] = true
 					enacted = enacted + 1
+					power = math.max(0, power - policy.cost)
 				end
 			end
 		end
@@ -1993,7 +2085,7 @@ end
 --============================================================
 -- Auto Trade core (AI-only, updates list, skips flow-exceed candidates)
 --============================================================
-local function getValidCandidates(myCountry, resource, unitSellPrice)
+getValidCandidates = function(myCountry, resource, unitSellPrice)
 	local valid = {}
 	local playerSet = buildPlayerIdentitySet()
 
@@ -2132,6 +2224,7 @@ end
 --============================================================
 local AutoBuild = {
 	CityIndex = 1,
+	Pending = {},
 	LastStatus = "Idle"
 }
 
@@ -2161,10 +2254,14 @@ local function getAutoBuildOrder(selected)
 
 	local ordered = {}
 	local seen = {}
+	local selectedSet = {}
+	for _, name in ipairs(selected) do
+		selectedSet[name] = true
+	end
 
-	if CONFIG.AutoBuildPriority == "Infrastructure First" then
+	if CONFIG.AutoBuildPriority == "Infrastructure First" and selectedSet.Infrastructure then
 		pushUnique(ordered, seen, "Infrastructure")
-	elseif CONFIG.AutoBuildPriority == "Develop First" then
+	elseif CONFIG.AutoBuildPriority == "Develop First" and selectedSet["Develop City"] then
 		pushUnique(ordered, seen, "Develop City")
 	elseif CONFIG.AutoBuildPriority == "Factories First" then
 		for _, name in ipairs(selected) do
@@ -2179,6 +2276,28 @@ local function getAutoBuildOrder(selected)
 	end
 
 	return ordered
+end
+
+local function buildPendingKey(city, buildingName)
+	return tostring(city and city.Name) .. "|" .. tostring(buildingName)
+end
+
+local function isBuildPending(city, buildingName)
+	local key = buildPendingKey(city, buildingName)
+	local retryAt = AutoBuild.Pending[key]
+	if retryAt and retryAt <= now() then
+		AutoBuild.Pending[key] = nil
+		retryAt = nil
+	end
+	return retryAt ~= nil
+end
+
+local function requestBuilding(city, buildingName)
+	local sent = fireCreateBuilding(city, buildingName)
+	if sent then
+		AutoBuild.Pending[buildPendingKey(city, buildingName)] = now() + 5
+	end
+	return sent
 end
 
 local function attemptAutoBuildOnce(BuildAttemptLabel, BuildCityLabel, BuildTierLabel, BuildInfraLabel, BuildFundsLabel, BuildQueueLabel, BuildCitiesCountLabel, BuildCitiesFolderLabel)
@@ -2242,65 +2361,77 @@ local function attemptAutoBuildOnce(BuildAttemptLabel, BuildCityLabel, BuildTier
 	end
 
 	list = getAutoBuildOrder(list)
+	local blockedReason
 	for i = 1, #list do
 		local buildingName = list[i]
 
 		if buildingName == "Infrastructure" then
 			if type(infra) ~= "number" or infra < 10 then
+				if isBuildPending(city, buildingName) then
+					blockedReason = blockedReason or ("waiting for Infrastructure replication")
+				else
 				local okAfford, cost = canAffordBuilding("Infrastructure")
 				if not okAfford then
+					blockedReason = blockedReason or ("can't afford Infrastructure, cost=" .. tostring(cost))
+				else
 					if BuildAttemptLabel then
-						BuildAttemptLabel:SetText("Attempt: (can't afford Infrastructure) cost=" .. tostring(cost))
+						BuildAttemptLabel:SetText("Request: Infrastructure in " .. city.Name)
 					end
-					return
+					if requestBuilding(city, "Infrastructure") then
+						return
+					end
+					blockedReason = blockedReason or "Infrastructure request failed"
 				end
-				if BuildAttemptLabel then
-					BuildAttemptLabel:SetText("Attempt: Infrastructure in " .. city.Name)
 				end
-				fireCreateBuilding(city, "Infrastructure")
-				return
 			end
 		elseif buildingName == "Develop City" then
 			if type(tier) ~= "number" or tier < 10 then
+				if isBuildPending(city, buildingName) then
+					blockedReason = blockedReason or ("waiting for Develop City replication")
+				else
 				local okAfford, cost = canAffordBuilding("Develop City")
 				if not okAfford then
+					blockedReason = blockedReason or ("can't afford Develop City, cost=" .. tostring(cost))
+				else
 					if BuildAttemptLabel then
-						BuildAttemptLabel:SetText("Attempt: (can't afford Develop City) cost=" .. tostring(cost))
+						BuildAttemptLabel:SetText("Request: Develop City in " .. city.Name)
 					end
-					return
+					if requestBuilding(city, "Develop City") then
+						return
+					end
+					blockedReason = blockedReason or "Develop City request failed"
 				end
-				if BuildAttemptLabel then
-					BuildAttemptLabel:SetText("Attempt: Develop City in " .. city.Name)
 				end
-				fireCreateBuilding(city, "Develop City")
-				return
 			end
 		elseif not cityHasBuilding(city, buildingName) then
-			local okAfford, cost = canAffordBuilding(buildingName)
-			if not okAfford then
-				if BuildAttemptLabel then
-					BuildAttemptLabel:SetText("Attempt: (can't afford " .. buildingName .. ") cost=" .. tostring(cost))
+			if isBuildPending(city, buildingName) then
+				blockedReason = blockedReason or ("waiting for " .. buildingName .. " replication")
+			else
+				local okAfford, cost = canAffordBuilding(buildingName)
+				if not okAfford then
+					blockedReason = blockedReason or ("can't afford " .. buildingName .. ", cost=" .. tostring(cost))
+				else
+					if BuildAttemptLabel then
+						BuildAttemptLabel:SetText("Request: " .. buildingName .. " in " .. city.Name)
+					end
+					if requestBuilding(city, buildingName) then
+						return
+					end
+					blockedReason = blockedReason or (buildingName .. " request failed")
 				end
-				return
 			end
-
-			if BuildAttemptLabel then
-				BuildAttemptLabel:SetText("Attempt: " .. buildingName .. " in " .. city.Name)
-			end
-			fireCreateBuilding(city, buildingName)
-			return
 		end
 	end
 
 	if BuildAttemptLabel then
-		BuildAttemptLabel:SetText("Attempt: (nothing to do)")
+		BuildAttemptLabel:SetText(blockedReason and ("Attempt: (" .. blockedReason .. ")") or "Attempt: (nothing to do)")
 	end
 end
 
 --============================================================
 -- Nation Brain UI Library
 --============================================================
-local RequiredBrainUIVersion = "2026-06-20.12"
+local RequiredBrainUIVersion = "2026-07-23.1"
 local BrainUILibraryUrl = "https://raw.githubusercontent.com/tetizz/roblox-stuff/main/ron_brain_ui.lua"
 
 local function makeHeadlessStatus(text)
@@ -2336,6 +2467,7 @@ local function makeHeadlessBrainUI(reason)
 		TradeValidLabel = "Valid countries: 0",
 		TradeValidListLabel = "Valid list: (none)",
 		TradeFlowSafetyLabel = "Flow Safety: ON",
+		TradeTargetFilterLabel = "Target Filter: AI Only",
 		WarStatusLabel = "Auto Wars: Idle",
 		PromoteStatusLabel = "Auto Promote: Idle",
 		DebtStatusLabel = "Debt Guard: Idle",
@@ -2398,6 +2530,14 @@ local function loadBrainUI()
 			BuildingsFolder = BuildingsFolder,
 			CountryData = CountryData,
 			Policy = Policy,
+			War = War,
+			Resupply = Resupply,
+			AutoBuild = AutoBuild,
+			DebtRecovery = DebtRecovery,
+			Promote = Promote,
+			Watcher = Watcher,
+			JustWatch = JustWatch,
+			LeaderWatch = LeaderWatch,
 			assertStillLeader = assertStillLeader,
 			getAllMyCitiesSorted = getAllMyCitiesSorted,
 			getMyFunds = getMyFunds,
@@ -2427,6 +2567,9 @@ local function loadBrainUI()
 end
 
 local BrainUI = loadBrainUI()
+if type(BrainUI.Notify) == "function" then
+	CustomNotify = BrainUI.Notify
+end
 
 local DashCountryLabel = BrainUI.Status.DashCountryLabel
 local DashFundsLabel = BrainUI.Status.DashFundsLabel
@@ -2452,6 +2595,7 @@ local TradeAttemptingLabel = BrainUI.Status.TradeAttemptingLabel
 local TradeValidLabel = BrainUI.Status.TradeValidLabel
 local TradeValidListLabel = BrainUI.Status.TradeValidListLabel
 local TradeFlowSafetyLabel = BrainUI.Status.TradeFlowSafetyLabel
+local TradeTargetFilterLabel = BrainUI.Status.TradeTargetFilterLabel
 
 local WarStatusLabel = BrainUI.Status.WarStatusLabel
 local PromoteStatusLabel = BrainUI.Status.PromoteStatusLabel
@@ -2496,12 +2640,18 @@ task.spawn(function()
 				TradeFlowLabel:SetText("Flow: " .. tostring(getCountryResourceFlow(myCountry, CONFIG.TradeResource)))
 				TradeIncomeLabel:SetText("Trade Export: " .. tostring(getTradeIncomeFallback(myCountry)))
 				TradePercentLabel:SetText("Trade Percent: " .. tostring(math.floor(CONFIG.TradeTargetPercent * 100 + 0.5)) .. "%")
+				if TradeTargetFilterLabel then
+					TradeTargetFilterLabel:SetText("Target Filter: " .. (CONFIG.TradeOnlyAI and "AI Only" or "All Countries"))
+				end
 			else
 				TradeCountryLabel:SetText("Country: (not leader)")
 				TradePartnerLabel:SetText("Partners: ?")
 				TradeFlowLabel:SetText("Flow: ?")
 				TradeIncomeLabel:SetText("Trade Export: ?")
 				TradePercentLabel:SetText("Trade Percent: ?")
+				if TradeTargetFilterLabel then
+					TradeTargetFilterLabel:SetText("Target Filter: " .. (CONFIG.TradeOnlyAI and "AI Only" or "All Countries"))
+				end
 			end
 		end)
 
@@ -2521,6 +2671,12 @@ task.spawn(function()
 		if CONFIG.UnitTagsEnabled then
 			runEvery("unit_tags", 0.25, function()
 				ForceTags()
+				UnitTagsStatusLabel:SetText("Unit Tags: Running")
+			end)
+		else
+			runEvery("unit_tags_idle", 0.5, function()
+				RestoreTags()
+				UnitTagsStatusLabel:SetText("Unit Tags: Idle")
 			end)
 		end
 
@@ -2542,6 +2698,10 @@ task.spawn(function()
 				doRebelWatch()
 				WatcherStatusLabel:SetText("Rebel Watch: " .. Watcher.LastStatus)
 			end)
+		else
+			runEvery("rebel_watch_idle", 0.5, function()
+				WatcherStatusLabel:SetText("Rebel Watch: Idle")
+			end)
 		end
 
 		-- Justification watch constant
@@ -2549,6 +2709,10 @@ task.spawn(function()
 			runEvery("justify_watch", 0.75, function()
 				doJustificationWatch()
 				JustWatchStatusLabel:SetText("Justify Watch: " .. JustWatch.LastStatus)
+			end)
+		else
+			runEvery("justify_watch_idle", 0.5, function()
+				JustWatchStatusLabel:SetText("Justify Watch: Idle")
 			end)
 		end
 
@@ -2558,31 +2722,44 @@ task.spawn(function()
 				doLeaderWatch()
 				LeaderWatchStatusLabel:SetText("Leader Watch: " .. LeaderWatch.LastStatus)
 			end)
+		else
+			runEvery("leader_watch_idle", 0.5, function()
+				LeaderWatchStatusLabel:SetText("Leader Watch: Idle")
+			end)
 		end
 
 		-- Auto wars (internal throttle, constant style)
+		local warAutomationEnabled = false
 		if CONFIG.AutoJustifyEnabled then
+			warAutomationEnabled = true
 			runEvery("auto_justify", 1.0, function()
 				doAutoJustify()
 				WarStatusLabel:SetText("Auto Wars: " .. War.LastStatus)
 			end)
 		end
 		if CONFIG.AutoDeclareEnabled then
+			warAutomationEnabled = true
 			runEvery("auto_declare", 1.0, function()
 				doAutoDeclare()
 				WarStatusLabel:SetText("Auto Wars: " .. War.LastStatus)
 			end)
 		end
-		if CONFIG.AutoPeaceEnabled then
+		if CONFIG.AutoAnnexEnabled then
+			warAutomationEnabled = true
+			runEvery("auto_annex", 1.0, function()
+				doAutoAnnex()
+				WarStatusLabel:SetText("Auto Wars: " .. War.LastStatus)
+			end)
+		elseif CONFIG.AutoPeaceEnabled then
+			warAutomationEnabled = true
 			runEvery("auto_peace", 1.0, function()
 				doAutoPeace()
 				WarStatusLabel:SetText("Auto Wars: " .. War.LastStatus)
 			end)
 		end
-		if CONFIG.AutoAnnexEnabled then
-			runEvery("auto_annex", 1.0, function()
-				doAutoAnnex()
-				WarStatusLabel:SetText("Auto Wars: " .. War.LastStatus)
+		if not warAutomationEnabled then
+			runEvery("auto_wars_idle", 0.5, function()
+				WarStatusLabel:SetText("Auto Wars: Idle")
 			end)
 		end
 
@@ -2646,10 +2823,14 @@ task.spawn(function()
 				doAutoPromote()
 				PromoteStatusLabel:SetText("Auto Promote: " .. Promote.LastStatus)
 			end)
+		else
+			runEvery("auto_promote_idle", 0.5, function()
+				PromoteStatusLabel:SetText("Auto Promote: Idle")
+			end)
 		end
 
 		task.wait(0.05)
 	end
 end)
 
-safeNotify("RoN Nation Brain", "Loaded. RightShift toggles the dashboard.", 4)
+safeNotify("RoN Nation Brain", "Loaded. RightControl toggles the dashboard.", 4)
