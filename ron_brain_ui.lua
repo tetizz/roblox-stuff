@@ -344,6 +344,7 @@ local function createNotificationHost(Library, config)
 		if ok then
 			return icon
 		end
+		return nil
 	end
 
 	local function show(title, description, duration, iconName)
@@ -519,6 +520,12 @@ function BrainUI.new(ctx)
 		TabSwipeFrom = "right"
 	})
 
+	local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
+	if type(Window.SetCompact) == "function"
+		and (Library.IsMobile == true or (viewport and viewport.X < 900)) then
+		Window:SetCompact(true)
+	end
+
 	local Tabs = {
 		Dashboard = Window:AddTab("Dashboard", "layout-dashboard"),
 		Trade = Window:AddTab("Trade", "repeat-2"),
@@ -560,6 +567,73 @@ function BrainUI.new(ctx)
 		SettingsControls = Tabs.Settings:AddLeftGroupbox("Interface", "settings"),
 		SettingsStatus = Tabs.Settings:AddRightGroupbox("Runtime", "wrench")
 	}
+
+	local originalGroupParents = {}
+
+	local function applyResponsiveTabLayout(tab)
+		local sides = tab and tab.Sides
+		if type(sides) ~= "table" or not sides[1] or not sides[2] then
+			return
+		end
+
+		local camera = workspace.CurrentCamera
+		local viewportSize = camera and camera.ViewportSize
+		local singleColumn = viewportSize and viewportSize.X < 540
+		local leftSide = sides[1]
+		local rightSide = sides[2]
+
+		for _, group in pairs(tab.Groupboxes or {}) do
+			local holder = group.BoxHolder
+			if holder then
+				if not originalGroupParents[holder] then
+					originalGroupParents[holder] = holder.Parent
+				end
+				if singleColumn then
+					holder.Parent = leftSide
+				else
+					holder.Parent = originalGroupParents[holder]
+				end
+			end
+		end
+
+		if singleColumn then
+			leftSide.Size = UDim2.new(1, 0, 1, leftSide.Size.Y.Offset)
+			rightSide.Visible = false
+		else
+			rightSide.Visible = true
+		end
+	end
+
+	local function refreshResponsiveLayout()
+		for _, tab in pairs(Tabs) do
+			tab:RefreshSides()
+		end
+	end
+
+	local function installResponsiveLayout()
+		for _, tab in pairs(Tabs) do
+			for _, group in pairs(tab.Groupboxes or {}) do
+				if group.BoxHolder then
+					originalGroupParents[group.BoxHolder] = group.BoxHolder.Parent
+				end
+			end
+
+			local originalRefresh = tab.RefreshSides
+			tab.RefreshSides = function(self, ...)
+				originalRefresh(self, ...)
+				applyResponsiveTabLayout(self)
+			end
+		end
+
+		refreshResponsiveLayout()
+
+		local camera = workspace.CurrentCamera
+		if camera and type(Library.GiveSignal) == "function" then
+			Library:GiveSignal(camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+				task.defer(refreshResponsiveLayout)
+			end))
+		end
+	end
 
 	local status = {}
 	local function addStatus(group, key)
@@ -1018,7 +1092,10 @@ function BrainUI.new(ctx)
 		Min = 0,
 		Max = 10000000,
 		Rounding = 0,
-		Prefix = "$"
+		Prefix = "$",
+		FormatDisplayValue = function(_, value)
+			return ("$%s / $%s"):format(formatNumber(value), formatNumber(10000000))
+		end
 	}):OnChanged(function(value)
 		config.DebtGuardFloor = value
 	end)
@@ -1518,6 +1595,7 @@ function BrainUI.new(ctx)
 	ThemeManager:ApplyToTab(Tabs.Settings, "palette")
 	SaveManager:BuildConfigSection(Tabs.Settings, "save")
 	ThemeManager:LoadDefault()
+	installResponsiveLayout()
 
 	local function clearCustomArtifacts()
 		destroyToastHost()

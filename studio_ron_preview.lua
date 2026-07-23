@@ -239,7 +239,7 @@ function StudioThemeManager:ApplyToTab(tab)
 		Rounding = 0,
 		Suffix = "%"
 	}):OnChanged(function(value)
-		self.Library:SetDPIScale(value / 100)
+		self.Library:SetDPIScale(value)
 	end)
 end
 
@@ -384,6 +384,8 @@ local JustWatch = { LastStatus = "Idle" }
 local LeaderWatch = { LastStatus = "Idle" }
 
 local currentUI
+local controlBus
+local cleanup
 
 local function attemptOneTrade(_, attemptingLabel, setValidList, flowSafetyLabel)
 	local valid = { "Canada", "Mexico", "Brazil", "Argentina" }
@@ -444,14 +446,29 @@ end
 
 local function scanAndResupplyOnce()
 	local details = {}
+	local prioritized = {}
 	for resource, amount in pairs(mock.shortages) do
 		if amount > 0 then
-			details[#details + 1] = resource .. " +" .. tostring(amount)
-			mock.flow[resource] = (mock.flow[resource] or 0) + amount
-			mock.shortages[resource] = 0
+			prioritized[#prioritized + 1] = {
+				resource = resource,
+				amount = amount
+			}
 		end
 	end
-	table.sort(details)
+	table.sort(prioritized, function(a, b)
+		if a.amount == b.amount then
+			return a.resource < b.resource
+		end
+		return a.amount > b.amount
+	end)
+
+	local budget = math.max(0, math.floor(tonumber(Resupply.MaxTradesPerScan) or 0))
+	for index = 1, math.min(budget, #prioritized) do
+		local item = prioritized[index]
+		details[#details + 1] = item.resource .. " +" .. tostring(item.amount)
+		mock.flow[item.resource] = (mock.flow[item.resource] or 0) + item.amount
+		mock.shortages[item.resource] = 0
+	end
 	if #details == 0 then
 		return {}
 	end
@@ -553,17 +570,148 @@ local context = {
 
 currentUI = BrainUI.new(context)
 
+controlBus = Instance.new("BindableFunction")
+controlBus.Name = "RoNPreviewControl"
+controlBus.Parent = player:WaitForChild("PlayerGui")
+controlBus.OnInvoke = function(command, key, value)
+	if command == "showTab" then
+		local tab = currentUI.Tabs[key]
+		if not tab then
+			return false, "Unknown tab"
+		end
+		tab:Show()
+		return true
+	elseif command == "setToggle" then
+		local control = currentUI.UI.Toggles[key]
+		if not control then
+			return false, "Unknown toggle"
+		end
+		control:SetValue(value == true)
+		return true, control.Value
+	elseif command == "setOption" then
+		local control = currentUI.UI.Options[key]
+		if not control then
+			return false, "Unknown option"
+		end
+		control:SetValue(value)
+		return true, control.Value
+	elseif command == "getConfig" then
+		return true, deepCopy(CONFIG[key])
+	elseif command == "getMock" then
+		return true, deepCopy(mock[key])
+	elseif command == "getPolicy" then
+		return true, deepCopy(Policy.Selected[key])
+	elseif command == "getRuntime" then
+		local runtime = {
+			Resupply = Resupply,
+			AutoBuild = AutoBuild,
+			DebtRecovery = DebtRecovery,
+			Policy = Policy,
+			War = War,
+			Promote = Promote,
+			Watcher = Watcher,
+			JustWatch = JustWatch,
+			LeaderWatch = LeaderWatch
+		}
+		return true, deepCopy(runtime[key])
+	elseif command == "getStatus" then
+		local label = currentUI.Status[key]
+		if not label then
+			return false, "Unknown status"
+		end
+		return true, label.Text
+	elseif command == "getControl" then
+		local control = currentUI.UI.Toggles[key] or currentUI.UI.Options[key]
+		if not control then
+			return false, "Unknown control"
+		end
+		return true, deepCopy(control.Value)
+	elseif command == "getLibraryState" then
+		return true, {
+			ToggleKeybind = currentUI.UI.ToggleKeybind and currentUI.UI.ToggleKeybind.Name,
+			DPIScale = currentUI.UI.DPIScale,
+			NotifySide = currentUI.UI.NotifySide,
+			Unloaded = currentUI.UI.Unloaded == true
+		}
+	elseif command == "notify" then
+		currentUI.Notify(key, value, 4)
+		return true
+	elseif command == "call" then
+		local callback = context[key]
+		if type(callback) ~= "function" then
+			return false, "Unknown callback"
+		end
+		return callback()
+	elseif command == "runAction" then
+		if key == "trade" then
+			return context.attemptOneTrade(
+				currentUI.Status.TradeStatusLabel,
+				currentUI.Status.TradeAttemptingLabel,
+				currentUI.setTradeValidList,
+				currentUI.Status.TradeFlowSafetyLabel
+			)
+		elseif key == "build" then
+			return context.attemptAutoBuildOnce(
+				currentUI.Status.BuildAttemptLabel,
+				currentUI.Status.BuildCityLabel,
+				currentUI.Status.BuildTierLabel,
+				currentUI.Status.BuildInfraLabel,
+				currentUI.Status.BuildFundsLabel,
+				currentUI.Status.BuildQueueLabel,
+				currentUI.Status.BuildCitiesCountLabel,
+				currentUI.Status.BuildCitiesFolderLabel
+			)
+		elseif key == "resupply" then
+			return context.scanAndResupplyOnce()
+		elseif key == "debt" then
+			return context.doDebtGuardOnce()
+		elseif key == "policy" then
+			return context.doAutoPolicy()
+		elseif key == "justify" then
+			return context.doAutoJustify()
+		elseif key == "declare" then
+			return context.doAutoDeclare()
+		elseif key == "peace" then
+			return context.doAutoPeace()
+		elseif key == "annex" then
+			return context.doAutoAnnex()
+		elseif key == "promote" then
+			return context.doAutoPromote()
+		end
+		return false, "Unknown action"
+	elseif command == "save" then
+		shared.RoNPreviewConfig = StudioSaveManager:_capture()
+		return true
+	elseif command == "load" then
+		return StudioSaveManager:_apply(shared.RoNPreviewConfig)
+	elseif command == "theme" then
+		StudioThemeManager:_apply(key)
+		return true
+	elseif command == "refresh" then
+		currentUI.updateDashboard()
+		return true
+	elseif command == "destroy" then
+		task.defer(cleanup)
+		return true
+	end
+
+	return false, "Unknown command"
+end
+
 local alive = true
+local cleanupStarted = false
 currentUI.UI:OnUnload(function()
 	alive = false
+	task.defer(cleanup)
 end)
 
-local function cleanup()
-	if not alive then
+cleanup = function()
+	if cleanupStarted then
 		return
 	end
+	cleanupStarted = true
 	alive = false
-	if currentUI and currentUI.Destroy then
+	if currentUI and currentUI.Destroy and not currentUI.UI.Unloaded then
 		currentUI.Destroy()
 	end
 	resources:Destroy()
@@ -574,6 +722,10 @@ local function cleanup()
 	end
 	if _G and _G.RoNStudioPreviewCleanup == cleanup then
 		_G.RoNStudioPreviewCleanup = nil
+	end
+	if controlBus then
+		controlBus:Destroy()
+		controlBus = nil
 	end
 end
 
